@@ -1,6 +1,8 @@
 export interface ImageAsset {
   id: string;
-  src: string;
+  name: string;
+  objectUrl: string;
+  thumbnailUrl: string;
   width: number;
   height: number;
   aspectRatio: number;

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
+import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { initCanvas, resizeCanvasPreview } from "@/lib/fabric/initCanvas";
 import { useEditorStore } from "@/store/editorStore";
 
@@ -11,6 +12,7 @@ export function CanvasStage() {
   const canvasElementRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<FabricCanvas | null>(null);
+  const { registerCanvas } = useEditorCommands();
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const isCanvasReady = useEditorStore((state) => state.isCanvasReady);
   const setCanvasReady = useEditorStore((state) => state.setCanvasReady);
@@ -18,15 +20,31 @@ export function CanvasStage() {
 
   useEffect(() => {
     const canvasElement = canvasElementRef.current;
-    const viewport = viewportRef.current;
 
-    if (!canvasElement || !viewport) {
+    if (!canvasElement) {
       return;
     }
 
     const fabricCanvas = initCanvas(canvasElement);
     fabricRef.current = fabricCanvas;
+    registerCanvas(fabricCanvas);
     setCanvasReady(true);
+
+    return () => {
+      registerCanvas(null);
+      setCanvasReady(false);
+      fabricRef.current = null;
+      fabricCanvas.dispose();
+    };
+  }, [registerCanvas, setCanvasReady]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const fabricCanvas = fabricRef.current;
+
+    if (!viewport || !fabricCanvas) {
+      return;
+    }
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       if (!entry) {
@@ -44,11 +62,8 @@ export function CanvasStage() {
 
     return () => {
       resizeObserver.disconnect();
-      setCanvasReady(false);
-      fabricRef.current = null;
-      fabricCanvas.dispose();
     };
-  }, [canvasSize, setCanvasReady, setPreviewScale]);
+  }, [canvasSize, setPreviewScale]);
 
   return (
     <div className="canvas-stage" ref={viewportRef}>

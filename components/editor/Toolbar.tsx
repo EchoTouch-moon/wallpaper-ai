@@ -1,12 +1,21 @@
 "use client";
 
 import { RATIO_PRESETS } from "@/lib/wallpaper/ratios";
+import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { useEditorStore } from "@/store/editorStore";
 import type { WallpaperRatioId } from "@/types/wallpaper";
 
 export function Toolbar() {
   const ratioId = useEditorStore((state) => state.ratioId);
   const setRatio = useEditorStore((state) => state.setRatio);
+  const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
+  const {
+    deleteSelection,
+    duplicateSelection,
+    moveSelectionBackward,
+    moveSelectionForward,
+  } = useEditorCommands();
+  const hasSelection = Boolean(selectedObjectId);
 
   return (
     <header className="toolbar editor-glass">
@@ -16,16 +25,40 @@ export function Toolbar() {
       </div>
       <div className="toolbar-actions">
         <div className="toolbar-command-group" aria-label="Canvas commands">
-          <button className="icon-button" disabled aria-label="Duplicate" title="Duplicate">
+          <button
+            className="icon-button"
+            disabled={!hasSelection}
+            aria-label="Duplicate"
+            title="Duplicate"
+            onClick={() => void duplicateSelection()}
+          >
             ⧉
           </button>
-          <button className="icon-button" disabled aria-label="Move backward" title="Move backward">
+          <button
+            className="icon-button"
+            disabled={!hasSelection}
+            aria-label="Move backward"
+            title="Move backward"
+            onClick={moveSelectionBackward}
+          >
             ↓
           </button>
-          <button className="icon-button" disabled aria-label="Move forward" title="Move forward">
+          <button
+            className="icon-button"
+            disabled={!hasSelection}
+            aria-label="Move forward"
+            title="Move forward"
+            onClick={moveSelectionForward}
+          >
             ↑
           </button>
-          <button className="icon-button" disabled aria-label="Delete" title="Delete">
+          <button
+            className="icon-button"
+            disabled={!hasSelection}
+            aria-label="Delete"
+            title="Delete"
+            onClick={deleteSelection}
+          >
             ×
           </button>
         </div>

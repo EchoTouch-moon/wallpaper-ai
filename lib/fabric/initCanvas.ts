@@ -8,9 +8,12 @@ interface PreviewBounds {
 
 export function initCanvas(element: HTMLCanvasElement) {
   return new Canvas(element, {
-    backgroundColor: "#e8e5d9",
+    backgroundColor: "#f4f3ed",
     preserveObjectStacking: true,
     selection: true,
+    selectionColor: "rgba(22, 140, 255, 0.12)",
+    selectionBorderColor: "#62b1ff",
+    selectionLineWidth: 1,
   });
 }
 

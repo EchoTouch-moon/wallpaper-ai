@@ -5,6 +5,17 @@ export interface CanvasSize {
   height: number;
 }
 
+export interface CanvasObjectSnapshot {
+  id: string;
+  assetId?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+}
+
 export interface WallpaperCanvas extends CanvasSize {
   id: string;
   ratio: string;
