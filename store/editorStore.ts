@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { getRatioPreset } from "@/lib/wallpaper/ratios";
 import type { ImageAsset } from "@/types/asset";
 import type { CanvasObjectSnapshot, CanvasSize } from "@/types/canvas";
+import type { CompositionIntent } from "@/types/layout";
 import type { WallpaperRatioId } from "@/types/wallpaper";
 
 interface EditorState {
@@ -16,6 +17,9 @@ interface EditorState {
   notice: string | null;
   exportStatus: "idle" | "exporting" | "success" | "error";
   exportError: string | null;
+  isAssetPanelOpen: boolean;
+  isInspectorOpen: boolean;
+  compositionIntent: CompositionIntent;
   setRatio: (ratioId: WallpaperRatioId) => void;
   addAssets: (assets: ImageAsset[]) => void;
   removeAsset: (assetId: string) => void;
@@ -30,6 +34,10 @@ interface EditorState {
     exportStatus: EditorState["exportStatus"],
     exportError: string | null,
   ) => void;
+  toggleAssetPanel: () => void;
+  toggleInspector: () => void;
+  toggleFocusMode: () => void;
+  setCompositionIntent: (intent: CompositionIntent) => void;
   resetEditor: () => void;
 }
 
@@ -50,6 +58,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   notice: null,
   exportStatus: "idle",
   exportError: null,
+  isAssetPanelOpen: true,
+  isInspectorOpen: true,
+  compositionIntent: "hero-with-support",
   setRatio: (ratioId) => {
     const ratio = getRatioPreset(ratioId);
     set({
@@ -77,6 +88,19 @@ export const useEditorStore = create<EditorState>((set) => ({
   setCanvasReady: (isCanvasReady) => set({ isCanvasReady }),
   setNotice: (notice) => set({ notice }),
   setExportState: (exportStatus, exportError) => set({ exportStatus, exportError }),
+  toggleAssetPanel: () =>
+    set((state) => ({ isAssetPanelOpen: !state.isAssetPanelOpen })),
+  toggleInspector: () =>
+    set((state) => ({ isInspectorOpen: !state.isInspectorOpen })),
+  toggleFocusMode: () =>
+    set((state) => {
+      const shouldOpen = !state.isAssetPanelOpen && !state.isInspectorOpen;
+      return {
+        isAssetPanelOpen: shouldOpen,
+        isInspectorOpen: shouldOpen,
+      };
+    }),
+  setCompositionIntent: (compositionIntent) => set({ compositionIntent }),
   resetEditor: () =>
     set({
       assets: [],

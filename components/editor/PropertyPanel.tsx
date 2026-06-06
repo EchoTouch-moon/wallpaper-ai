@@ -1,6 +1,8 @@
 "use client";
 
+import { COMPOSITION_PRESETS } from "@/lib/wallpaper/compositionPresets";
 import { useEditorStore } from "@/store/editorStore";
+import type { CompositionIntent } from "@/types/layout";
 
 export function PropertyPanel() {
   const canvasSize = useEditorStore((state) => state.canvasSize);
@@ -9,6 +11,11 @@ export function PropertyPanel() {
   const selectedObject = useEditorStore((state) => state.selectedObject);
   const exportStatus = useEditorStore((state) => state.exportStatus);
   const exportError = useEditorStore((state) => state.exportError);
+  const compositionIntent = useEditorStore((state) => state.compositionIntent);
+  const setCompositionIntent = useEditorStore((state) => state.setCompositionIntent);
+  const activeComposition =
+    COMPOSITION_PRESETS.find((preset) => preset.id === compositionIntent) ??
+    COMPOSITION_PRESETS[0];
 
   return (
     <aside className="side-panel right editor-glass">
@@ -69,6 +76,28 @@ export function PropertyPanel() {
         ) : (
           <p className="empty-selection">Select an image on the canvas to inspect it.</p>
         )}
+      </section>
+      <section className="panel-section">
+        <span className="panel-label">Composition direction</span>
+        <select
+          className="property-select"
+          value={compositionIntent}
+          onChange={(event) =>
+            setCompositionIntent(event.target.value as CompositionIntent)
+          }
+          aria-label="Composition direction"
+        >
+          {COMPOSITION_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {preset.label}
+            </option>
+          ))}
+        </select>
+        <p className="composition-note">{activeComposition.description}</p>
+        <p className="composition-best-for">
+          <strong>Best for</strong>
+          {activeComposition.bestFor}
+        </p>
       </section>
       <section className="panel-section">
         <span className="panel-label">Output</span>

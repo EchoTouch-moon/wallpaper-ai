@@ -11,6 +11,10 @@ export function Toolbar() {
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
   const isCanvasReady = useEditorStore((state) => state.isCanvasReady);
   const exportStatus = useEditorStore((state) => state.exportStatus);
+  const isAssetPanelOpen = useEditorStore((state) => state.isAssetPanelOpen);
+  const isInspectorOpen = useEditorStore((state) => state.isInspectorOpen);
+  const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
+  const toggleInspector = useEditorStore((state) => state.toggleInspector);
   const {
     deleteSelection,
     duplicateSelection,
@@ -27,6 +31,24 @@ export function Toolbar() {
         <span>Wallpaper Studio</span>
       </div>
       <div className="toolbar-actions">
+        <div className="toolbar-command-group panel-toggle-group" aria-label="Workspace panels">
+          <button
+            className={`icon-button ${isAssetPanelOpen ? "is-active" : ""}`}
+            aria-label="Toggle assets panel"
+            title="Toggle assets panel"
+            onClick={toggleAssetPanel}
+          >
+            ◧
+          </button>
+          <button
+            className={`icon-button ${isInspectorOpen ? "is-active" : ""}`}
+            aria-label="Toggle inspector"
+            title="Toggle inspector"
+            onClick={toggleInspector}
+          >
+            ◨
+          </button>
+        </div>
         <div className="toolbar-command-group" aria-label="Canvas commands">
           <button
             className="icon-button"

@@ -33,6 +33,8 @@ export interface EditorCommands {
   duplicateSelection: () => Promise<void>;
   moveSelectionForward: () => void;
   moveSelectionBackward: () => void;
+  nudgeSelection: (x: number, y: number) => void;
+  clearSelection: () => void;
   exportPng: () => Promise<void>;
 }
 
@@ -227,6 +229,35 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     }
   }, [syncCanvasState]);
 
+  const nudgeSelection = useCallback(
+    (x: number, y: number) => {
+      const canvas = canvasRef.current;
+      const activeObject = canvas?.getActiveObject();
+      if (!canvas || !activeObject) {
+        return;
+      }
+
+      activeObject.set({
+        left: activeObject.left + x,
+        top: activeObject.top + y,
+      });
+      activeObject.setCoords();
+      canvas.requestRenderAll();
+      syncCanvasState();
+    },
+    [syncCanvasState],
+  );
+
+  const clearSelection = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !canvas.getActiveObject()) {
+      return;
+    }
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+    syncCanvasState();
+  }, [syncCanvasState]);
+
   const exportPng = useCallback(async () => {
     const canvas = canvasRef.current;
     const state = useEditorStore.getState();
@@ -252,6 +283,87 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       useEditorStore.getState().setNotice("Could not export this wallpaper");
     }
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const commandKey = event.metaKey || event.ctrlKey;
+      const step = event.shiftKey ? 10 : 1;
+
+      if (event.key === "Tab") {
+        const canToggleFocus =
+          target === document.body ||
+          target instanceof HTMLCanvasElement ||
+          (target instanceof HTMLElement &&
+            Boolean(target.closest(".canvas-stage, .stage-region")));
+        if (canToggleFocus) {
+          event.preventDefault();
+          useEditorStore.getState().toggleFocusMode();
+        }
+        return;
+      }
+
+      if (event.key === "Escape") {
+        clearSelection();
+        return;
+      }
+
+      if ((event.key === "Delete" || event.key === "Backspace") && !commandKey) {
+        event.preventDefault();
+        deleteSelection();
+        return;
+      }
+
+      if (commandKey && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        void duplicateSelection();
+        return;
+      }
+
+      if (commandKey && event.key === "]") {
+        event.preventDefault();
+        moveSelectionForward();
+        return;
+      }
+
+      if (commandKey && event.key === "[") {
+        event.preventDefault();
+        moveSelectionBackward();
+        return;
+      }
+
+      const movement = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      }[event.key];
+
+      if (movement) {
+        event.preventDefault();
+        nudgeSelection(movement[0], movement[1]);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    clearSelection,
+    deleteSelection,
+    duplicateSelection,
+    moveSelectionBackward,
+    moveSelectionForward,
+    nudgeSelection,
+  ]);
 
   useEffect(() => {
     if (!notice) {
@@ -280,6 +392,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       duplicateSelection,
       moveSelectionForward,
       moveSelectionBackward,
+      nudgeSelection,
+      clearSelection,
       exportPng,
     }),
     [
@@ -287,8 +401,10 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       deleteSelection,
       duplicateSelection,
       exportPng,
+      clearSelection,
       moveSelectionBackward,
       moveSelectionForward,
+      nudgeSelection,
       registerCanvas,
       removeAsset,
     ],

@@ -6,7 +6,7 @@ import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { initCanvas, resizeCanvasPreview } from "@/lib/fabric/initCanvas";
 import { useEditorStore } from "@/store/editorStore";
 
-const STAGE_PADDING = 88;
+const STAGE_PADDING = 40;
 
 export function CanvasStage() {
   const canvasElementRef = useRef<HTMLCanvasElement>(null);
@@ -77,6 +77,20 @@ export function CanvasStage() {
         </span>
         <span>
           {canvasSize.width} × {canvasSize.height}
+        </span>
+      </div>
+      <div className="shortcut-hint" aria-label="Keyboard shortcuts">
+        <span>
+          <kbd>Tab</kbd> Focus
+        </span>
+        <span>
+          <kbd>⌘D</kbd> Duplicate
+        </span>
+        <span>
+          <kbd>↑↓←→</kbd> Nudge
+        </span>
+        <span>
+          <kbd>⌫</kbd> Delete
         </span>
       </div>
     </div>
