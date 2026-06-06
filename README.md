@@ -17,6 +17,7 @@ Tailwind CSS, Fabric.js, and Zustand.
 - Collapsible workspace panels and focus mode
 - Keyboard editing shortcuts
 - Composition intents and transition guidance for future AI layouts
+- Editable blurred backdrop generation for mixed-ratio compositions
 
 ## Keyboard shortcuts
 

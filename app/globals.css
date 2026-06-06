@@ -780,6 +780,43 @@ input:focus-visible {
   text-transform: uppercase;
 }
 
+.transition-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 13px;
+}
+
+.transition-actions button {
+  min-height: 32px;
+  flex: 1;
+  border: 1px solid rgba(40, 143, 164, 0.22);
+  border-radius: 9px;
+  padding: 0 9px;
+  color: #fff;
+  background: linear-gradient(135deg, #258eaf, #48a692);
+  font-size: 9px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.transition-actions button.secondary {
+  flex: 0 0 auto;
+  color: var(--editor-muted);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.transition-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.transition-help {
+  margin: 9px 0 0;
+  color: var(--editor-muted);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
 .export-message {
   margin: 14px 0 0;
   border-radius: 10px;

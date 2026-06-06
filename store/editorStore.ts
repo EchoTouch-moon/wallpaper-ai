@@ -12,6 +12,7 @@ interface EditorState {
   selectedObjectId: string | null;
   selectedObject: CanvasObjectSnapshot | null;
   objectCount: number;
+  hasBackdrop: boolean;
   previewScale: number;
   isCanvasReady: boolean;
   notice: string | null;
@@ -26,6 +27,7 @@ interface EditorState {
   setCanvasSnapshot: (snapshot: {
     objectCount: number;
     selectedObject: CanvasObjectSnapshot | null;
+    hasBackdrop: boolean;
   }) => void;
   setPreviewScale: (scale: number) => void;
   setCanvasReady: (isReady: boolean) => void;
@@ -53,6 +55,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   selectedObjectId: null,
   selectedObject: null,
   objectCount: 0,
+  hasBackdrop: false,
   previewScale: 1,
   isCanvasReady: false,
   notice: null,
@@ -78,11 +81,12 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       assets: state.assets.filter((asset) => asset.id !== assetId),
     })),
-  setCanvasSnapshot: ({ objectCount, selectedObject }) =>
+  setCanvasSnapshot: ({ objectCount, selectedObject, hasBackdrop }) =>
     set({
       objectCount,
       selectedObject,
       selectedObjectId: selectedObject?.id || null,
+      hasBackdrop,
     }),
   setPreviewScale: (previewScale) => set({ previewScale }),
   setCanvasReady: (isCanvasReady) => set({ isCanvasReady }),
@@ -107,6 +111,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       selectedObjectId: null,
       selectedObject: null,
       objectCount: 0,
+      hasBackdrop: false,
       notice: null,
       exportStatus: "idle",
       exportError: null,

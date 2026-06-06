@@ -1,5 +1,6 @@
 "use client";
 
+import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { COMPOSITION_PRESETS } from "@/lib/wallpaper/compositionPresets";
 import { useEditorStore } from "@/store/editorStore";
 import type { CompositionIntent } from "@/types/layout";
@@ -13,6 +14,8 @@ export function PropertyPanel() {
   const exportError = useEditorStore((state) => state.exportError);
   const compositionIntent = useEditorStore((state) => state.compositionIntent);
   const setCompositionIntent = useEditorStore((state) => state.setCompositionIntent);
+  const hasBackdrop = useEditorStore((state) => state.hasBackdrop);
+  const { createBlurredBackdrop, removeBackdrop } = useEditorCommands();
   const activeComposition =
     COMPOSITION_PRESETS.find((preset) => preset.id === compositionIntent) ??
     COMPOSITION_PRESETS[0];
@@ -97,6 +100,24 @@ export function PropertyPanel() {
         <p className="composition-best-for">
           <strong>Best for</strong>
           {activeComposition.bestFor}
+        </p>
+        <div className="transition-actions">
+          <button
+            type="button"
+            disabled={!selectedObject?.assetId || selectedObject.role === "background"}
+            onClick={() => void createBlurredBackdrop()}
+          >
+            {hasBackdrop ? "Replace soft backdrop" : "Create soft backdrop"}
+          </button>
+          {hasBackdrop ? (
+            <button type="button" className="secondary" onClick={removeBackdrop}>
+              Remove
+            </button>
+          ) : null}
+        </div>
+        <p className="transition-help">
+          Extends the selected photo behind the composition with blur and tonal
+          softening. Best for portrait or square photos on wide wallpapers.
         </p>
       </section>
       <section className="panel-section">

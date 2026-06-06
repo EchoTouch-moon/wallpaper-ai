@@ -41,7 +41,8 @@ strategy, then return editable geometry rather than a flattened image.
 
 1. **Blurred extension**: best when a single hero does not cover the canvas.
    Duplicate the hero behind itself, cover the canvas, blur it, reduce contrast,
-   and add a subtle color wash.
+   and add a subtle color wash. The editor currently implements the editable
+   blurred duplicate, automatic cover scaling, and tonal softening.
 2. **Soft gradient feather**: best for adjacent images with compatible light and
    color. Blend only the meeting edge; keep faces and important subjects sharp.
 3. **Shared color wash**: best for images from different scenes. Extract a common

@@ -12,6 +12,7 @@ import {
 import {
   FabricImage,
   FabricObject,
+  filters,
   type Canvas as FabricCanvas,
 } from "fabric";
 import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
@@ -35,6 +36,8 @@ export interface EditorCommands {
   moveSelectionBackward: () => void;
   nudgeSelection: (x: number, y: number) => void;
   clearSelection: () => void;
+  createBlurredBackdrop: () => Promise<void>;
+  removeBackdrop: () => void;
   exportPng: () => Promise<void>;
 }
 
@@ -50,6 +53,7 @@ function readObjectSnapshot(object: EditorFabricObject): CanvasObjectSnapshot {
   return {
     id: object.objectId ?? "",
     assetId: object.assetId,
+    role: object.role,
     x: Math.round(object.left),
     y: Math.round(object.top),
     width: Math.round(object.getScaledWidth()),
@@ -72,7 +76,29 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     useEditorStore.getState().setCanvasSnapshot({
       objectCount: canvas?.getObjects().length ?? 0,
       selectedObject: activeObject ? readObjectSnapshot(activeObject) : null,
+      hasBackdrop:
+        canvas?.getObjects().some((object) => {
+          return (object as EditorFabricObject).role === "background";
+        }) ?? false,
     });
+  }, []);
+
+  const fitBackdropToCanvas = useCallback((backdrop: FabricImage) => {
+    const { canvasSize } = useEditorStore.getState();
+    const scale = Math.max(
+      canvasSize.width / (backdrop.width || 1),
+      canvasSize.height / (backdrop.height || 1),
+    );
+
+    backdrop.set({
+      left: canvasSize.width / 2,
+      top: canvasSize.height / 2,
+      originX: "center",
+      originY: "center",
+      scaleX: scale,
+      scaleY: scale,
+    });
+    backdrop.setCoords();
   }, []);
 
   const registerCanvas = useCallback(
@@ -258,6 +284,75 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     syncCanvasState();
   }, [syncCanvasState]);
 
+  const removeBackdrop = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const backdrops = canvas
+      .getObjects()
+      .filter((object) => (object as EditorFabricObject).role === "background");
+    if (backdrops.length === 0) {
+      return;
+    }
+
+    canvas.remove(...backdrops);
+    canvas.requestRenderAll();
+    syncCanvasState();
+    useEditorStore.getState().setNotice("Backdrop removed");
+  }, [syncCanvasState]);
+
+  const createBlurredBackdrop = useCallback(async () => {
+    const canvas = canvasRef.current;
+    const activeObject = canvas?.getActiveObject();
+    if (!canvas || !(activeObject instanceof FabricImage)) {
+      useEditorStore.getState().setNotice("Select an image to create a backdrop");
+      return;
+    }
+
+    const source = activeObject as FabricImage & EditorFabricObject;
+    if (source.role === "background") {
+      return;
+    }
+
+    const existingBackdrops = canvas
+      .getObjects()
+      .filter((object) => (object as EditorFabricObject).role === "background");
+    if (existingBackdrops.length > 0) {
+      canvas.remove(...existingBackdrops);
+    }
+
+    const backdrop = (await source.clone([
+      "assetId",
+    ])) as FabricImage & EditorFabricObject;
+    backdrop.objectId = createObjectId();
+    backdrop.role = "background";
+    backdrop.filters = [
+      new filters.Blur({ blur: 0.16 }),
+      new filters.Brightness({ brightness: -0.12 }),
+      new filters.Saturation({ saturation: -0.18 }),
+    ];
+    backdrop.applyFilters();
+    backdrop.set({
+      angle: 0,
+      opacity: 0.94,
+      selectable: false,
+      evented: false,
+      hasControls: false,
+      hasBorders: false,
+      shadow: null,
+    });
+    fitBackdropToCanvas(backdrop);
+
+    canvas.add(backdrop);
+    canvas.sendObjectToBack(backdrop);
+    canvas.setActiveObject(source);
+    canvas.requestRenderAll();
+    syncCanvasState();
+    useEditorStore.getState().setNotice("Soft blurred backdrop created");
+  }, [fitBackdropToCanvas, syncCanvasState]);
+
   const exportPng = useCallback(async () => {
     const canvas = canvasRef.current;
     const state = useEditorStore.getState();
@@ -283,6 +378,30 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       useEditorStore.getState().setNotice("Could not export this wallpaper");
     }
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = useEditorStore.subscribe((state, previousState) => {
+      if (
+        state.canvasSize.width === previousState.canvasSize.width &&
+        state.canvasSize.height === previousState.canvasSize.height
+      ) {
+        return;
+      }
+
+      const canvas = canvasRef.current;
+      const backdrop = canvas
+        ?.getObjects()
+        .find(
+          (object) => (object as EditorFabricObject).role === "background",
+        );
+      if (backdrop instanceof FabricImage) {
+        fitBackdropToCanvas(backdrop);
+        canvas?.requestRenderAll();
+      }
+    });
+
+    return unsubscribe;
+  }, [fitBackdropToCanvas]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -394,6 +513,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       moveSelectionBackward,
       nudgeSelection,
       clearSelection,
+      createBlurredBackdrop,
+      removeBackdrop,
       exportPng,
     }),
     [
@@ -402,10 +523,12 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       duplicateSelection,
       exportPng,
       clearSelection,
+      createBlurredBackdrop,
       moveSelectionBackward,
       moveSelectionForward,
       nudgeSelection,
       registerCanvas,
+      removeBackdrop,
       removeAsset,
     ],
   );

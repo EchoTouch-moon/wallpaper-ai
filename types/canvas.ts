@@ -8,6 +8,7 @@ export interface CanvasSize {
 export interface CanvasObjectSnapshot {
   id: string;
   assetId?: string;
+  role?: "hero" | "support" | "background";
   x: number;
   y: number;
   width: number;
