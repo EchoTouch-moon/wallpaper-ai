@@ -719,6 +719,24 @@ input:focus-visible {
   line-height: 1.55;
 }
 
+.export-message {
+  margin: 14px 0 0;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.export-message.success {
+  color: #8eebae;
+  background: rgba(57, 190, 107, 0.1);
+}
+
+.export-message.error {
+  color: #ff9da9;
+  background: rgba(239, 65, 87, 0.1);
+}
+
 .stage-region {
   position: relative;
   min-width: 0;

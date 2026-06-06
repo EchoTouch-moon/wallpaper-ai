@@ -9,11 +9,14 @@ export function Toolbar() {
   const ratioId = useEditorStore((state) => state.ratioId);
   const setRatio = useEditorStore((state) => state.setRatio);
   const selectedObjectId = useEditorStore((state) => state.selectedObjectId);
+  const isCanvasReady = useEditorStore((state) => state.isCanvasReady);
+  const exportStatus = useEditorStore((state) => state.exportStatus);
   const {
     deleteSelection,
     duplicateSelection,
     moveSelectionBackward,
     moveSelectionForward,
+    exportPng,
   } = useEditorCommands();
   const hasSelection = Boolean(selectedObjectId);
 
@@ -76,8 +79,13 @@ export function Toolbar() {
             ))}
           </select>
         </label>
-        <button className="toolbar-button" disabled title="Export will be added in the next phase">
-          Export PNG
+        <button
+          className="toolbar-button"
+          disabled={!isCanvasReady || exportStatus === "exporting"}
+          title="Export at the selected wallpaper resolution"
+          onClick={() => void exportPng()}
+        >
+          {exportStatus === "exporting" ? "Exporting…" : "Export PNG"}
         </button>
       </div>
     </header>

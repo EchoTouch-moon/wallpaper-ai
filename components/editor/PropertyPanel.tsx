@@ -7,6 +7,8 @@ export function PropertyPanel() {
   const previewScale = useEditorStore((state) => state.previewScale);
   const objectCount = useEditorStore((state) => state.objectCount);
   const selectedObject = useEditorStore((state) => state.selectedObject);
+  const exportStatus = useEditorStore((state) => state.exportStatus);
+  const exportError = useEditorStore((state) => state.exportError);
 
   return (
     <aside className="side-panel right editor-glass">
@@ -67,6 +69,25 @@ export function PropertyPanel() {
         ) : (
           <p className="empty-selection">Select an image on the canvas to inspect it.</p>
         )}
+      </section>
+      <section className="panel-section">
+        <span className="panel-label">Output</span>
+        <div className="property-row">
+          <span>Format</span>
+          <span className="property-value">PNG</span>
+        </div>
+        <div className="property-row">
+          <span>Resolution</span>
+          <span className="property-value">
+            {canvasSize.width} × {canvasSize.height}
+          </span>
+        </div>
+        {exportStatus === "success" ? (
+          <p className="export-message success">Last export completed.</p>
+        ) : null}
+        {exportStatus === "error" ? (
+          <p className="export-message error">{exportError ?? "Export failed."}</p>
+        ) : null}
       </section>
     </aside>
   );

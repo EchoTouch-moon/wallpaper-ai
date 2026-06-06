@@ -14,6 +14,8 @@ interface EditorState {
   previewScale: number;
   isCanvasReady: boolean;
   notice: string | null;
+  exportStatus: "idle" | "exporting" | "success" | "error";
+  exportError: string | null;
   setRatio: (ratioId: WallpaperRatioId) => void;
   addAssets: (assets: ImageAsset[]) => void;
   removeAsset: (assetId: string) => void;
@@ -24,6 +26,10 @@ interface EditorState {
   setPreviewScale: (scale: number) => void;
   setCanvasReady: (isReady: boolean) => void;
   setNotice: (notice: string | null) => void;
+  setExportState: (
+    exportStatus: EditorState["exportStatus"],
+    exportError: string | null,
+  ) => void;
   resetEditor: () => void;
 }
 
@@ -42,6 +48,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   previewScale: 1,
   isCanvasReady: false,
   notice: null,
+  exportStatus: "idle",
+  exportError: null,
   setRatio: (ratioId) => {
     const ratio = getRatioPreset(ratioId);
     set({
@@ -50,6 +58,8 @@ export const useEditorStore = create<EditorState>((set) => ({
         width: ratio.width,
         height: ratio.height,
       },
+      exportStatus: "idle",
+      exportError: null,
     });
   },
   addAssets: (assets) => set((state) => ({ assets: [...state.assets, ...assets] })),
@@ -66,6 +76,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setPreviewScale: (previewScale) => set({ previewScale }),
   setCanvasReady: (isCanvasReady) => set({ isCanvasReady }),
   setNotice: (notice) => set({ notice }),
+  setExportState: (exportStatus, exportError) => set({ exportStatus, exportError }),
   resetEditor: () =>
     set({
       assets: [],
@@ -73,5 +84,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       selectedObject: null,
       objectCount: 0,
       notice: null,
+      exportStatus: "idle",
+      exportError: null,
     }),
 }));

@@ -14,6 +14,7 @@ import {
   FabricObject,
   type Canvas as FabricCanvas,
 } from "fabric";
+import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
 import { useEditorStore } from "@/store/editorStore";
 import type { ImageAsset } from "@/types/asset";
 import type { CanvasObjectSnapshot } from "@/types/canvas";
@@ -32,6 +33,7 @@ export interface EditorCommands {
   duplicateSelection: () => Promise<void>;
   moveSelectionForward: () => void;
   moveSelectionBackward: () => void;
+  exportPng: () => Promise<void>;
 }
 
 const EditorContext = createContext<EditorCommands | null>(null);
@@ -225,6 +227,32 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     }
   }, [syncCanvasState]);
 
+  const exportPng = useCallback(async () => {
+    const canvas = canvasRef.current;
+    const state = useEditorStore.getState();
+    if (!canvas || state.exportStatus === "exporting") {
+      return;
+    }
+
+    state.setExportState("exporting", null);
+
+    try {
+      const blob = await renderCanvasPng(canvas, state.canvasSize);
+      downloadPng(
+        blob,
+        `wallpaper-${state.canvasSize.width}x${state.canvasSize.height}.png`,
+      );
+      useEditorStore.getState().setExportState("success", null);
+      useEditorStore
+        .getState()
+        .setNotice(`Exported ${state.canvasSize.width} × ${state.canvasSize.height} PNG`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Export failed";
+      useEditorStore.getState().setExportState("error", message);
+      useEditorStore.getState().setNotice("Could not export this wallpaper");
+    }
+  }, []);
+
   useEffect(() => {
     if (!notice) {
       return;
@@ -252,11 +280,13 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       duplicateSelection,
       moveSelectionForward,
       moveSelectionBackward,
+      exportPng,
     }),
     [
       addImage,
       deleteSelection,
       duplicateSelection,
+      exportPng,
       moveSelectionBackward,
       moveSelectionForward,
       registerCanvas,

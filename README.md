@@ -10,8 +10,12 @@ Tailwind CSS, Fabric.js, and Zustand.
 - Wallpaper ratio presets
 - Zustand editor state
 - Fabric.js canvas initialization and preview scaling
+- Liquid glass responsive interface
+- JPG, PNG, and WebP asset uploads
+- Canvas image movement, scaling, rotation, duplication, deletion, and layering
+- Full-resolution PNG export
 
-AI generation, image upload, canvas editing commands, persistence, and export are
+AI generation, persistence, history, and wallpaper safe-area tools are
 intentionally deferred.
 
 ## Development
