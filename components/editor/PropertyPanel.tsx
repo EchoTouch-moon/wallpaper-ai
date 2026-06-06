@@ -7,7 +7,7 @@ export function PropertyPanel() {
   const previewScale = useEditorStore((state) => state.previewScale);
 
   return (
-    <aside className="side-panel right">
+    <aside className="side-panel right editor-glass">
       <div className="panel-heading">
         <h2>Inspector</h2>
         <span>Canvas</span>

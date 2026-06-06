@@ -9,12 +9,26 @@ export function Toolbar() {
   const setRatio = useEditorStore((state) => state.setRatio);
 
   return (
-    <header className="toolbar">
+    <header className="toolbar editor-glass">
       <div className="toolbar-brand">
         <span className="brand-mark" aria-hidden="true" />
         <span>Wallpaper Studio</span>
       </div>
       <div className="toolbar-actions">
+        <div className="toolbar-command-group" aria-label="Canvas commands">
+          <button className="icon-button" disabled aria-label="Duplicate" title="Duplicate">
+            ⧉
+          </button>
+          <button className="icon-button" disabled aria-label="Move backward" title="Move backward">
+            ↓
+          </button>
+          <button className="icon-button" disabled aria-label="Move forward" title="Move forward">
+            ↑
+          </button>
+          <button className="icon-button" disabled aria-label="Delete" title="Delete">
+            ×
+          </button>
+        </div>
         <label className="toolbar-control">
           <span>Ratio</span>
           <select
@@ -30,7 +44,7 @@ export function Toolbar() {
           </select>
         </label>
         <button className="toolbar-button" disabled title="Export will be added in the next phase">
-          Export
+          Export PNG
         </button>
       </div>
     </header>
