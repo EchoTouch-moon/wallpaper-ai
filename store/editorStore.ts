@@ -1,4 +1,9 @@
 import { create } from "zustand";
+import {
+  commitHistory,
+  redoHistory,
+  undoHistory,
+} from "@/lib/editor/history";
 import { getRatioPreset } from "@/lib/wallpaper/ratios";
 import type { ImageAsset } from "@/types/asset";
 import type {
@@ -7,7 +12,11 @@ import type {
   CropSession,
   SnapGuides,
 } from "@/types/canvas";
-import type { CompositionIntent } from "@/types/layout";
+import type {
+  CompositionIntent,
+  LayoutCandidate,
+  WallpaperLayout,
+} from "@/types/layout";
 import type { WallpaperRatioId } from "@/types/wallpaper";
 
 interface EditorState {
@@ -28,6 +37,10 @@ interface EditorState {
   isAssetPanelOpen: boolean;
   isInspectorOpen: boolean;
   compositionIntent: CompositionIntent;
+  candidates: LayoutCandidate[];
+  currentLayout: WallpaperLayout | null;
+  historyPast: Array<WallpaperLayout | null>;
+  historyFuture: Array<WallpaperLayout | null>;
   setRatio: (ratioId: WallpaperRatioId) => void;
   addAssets: (assets: ImageAsset[]) => void;
   removeAsset: (assetId: string) => void;
@@ -49,6 +62,10 @@ interface EditorState {
   toggleInspector: () => void;
   toggleFocusMode: () => void;
   setCompositionIntent: (intent: CompositionIntent) => void;
+  setCandidates: (candidates: LayoutCandidate[]) => void;
+  commitLayout: (layout: WallpaperLayout, addToHistory?: boolean) => void;
+  undoLayout: () => WallpaperLayout | null | undefined;
+  redoLayout: () => WallpaperLayout | null | undefined;
   resetEditor: () => void;
 }
 
@@ -75,6 +92,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   isAssetPanelOpen: true,
   isInspectorOpen: true,
   compositionIntent: "hero-with-support",
+  candidates: [],
+  currentLayout: null,
+  historyPast: [],
+  historyFuture: [],
   setRatio: (ratioId) => {
     const ratio = getRatioPreset(ratioId);
     set({
@@ -85,6 +106,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       },
       exportStatus: "idle",
       exportError: null,
+      candidates: [],
     });
   },
   addAssets: (assets) => set((state) => ({ assets: [...state.assets, ...assets] })),
@@ -118,6 +140,60 @@ export const useEditorStore = create<EditorState>((set) => ({
       };
     }),
   setCompositionIntent: (compositionIntent) => set({ compositionIntent }),
+  setCandidates: (candidates) => set({ candidates }),
+  commitLayout: (layout, addToHistory = true) =>
+    set((state) => {
+      if (!addToHistory) {
+        return { currentLayout: layout };
+      }
+      const history = commitHistory(
+        {
+          current: state.currentLayout,
+          past: state.historyPast,
+          future: state.historyFuture,
+        },
+        layout,
+      );
+      return {
+        currentLayout: history.current,
+        historyPast: history.past,
+        historyFuture: history.future,
+      };
+    }),
+  undoLayout: () => {
+    let target: WallpaperLayout | null | undefined;
+    set((state) => {
+      const result = undoHistory({
+        current: state.currentLayout,
+        past: state.historyPast,
+        future: state.historyFuture,
+      });
+      target = result.target;
+      return {
+        currentLayout: result.state.current,
+        historyPast: result.state.past,
+        historyFuture: result.state.future.slice(0, 50),
+      };
+    });
+    return target;
+  },
+  redoLayout: () => {
+    let target: WallpaperLayout | null | undefined;
+    set((state) => {
+      const result = redoHistory({
+        current: state.currentLayout,
+        past: state.historyPast,
+        future: state.historyFuture,
+      });
+      target = result.target;
+      return {
+        currentLayout: result.state.current,
+        historyPast: result.state.past.slice(-50),
+        historyFuture: result.state.future,
+      };
+    });
+    return target;
+  },
   resetEditor: () =>
     set({
       assets: [],
@@ -130,5 +206,9 @@ export const useEditorStore = create<EditorState>((set) => ({
       notice: null,
       exportStatus: "idle",
       exportError: null,
+      candidates: [],
+      currentLayout: null,
+      historyPast: [],
+      historyFuture: [],
     }),
 }));

@@ -4,6 +4,7 @@ import { AssetPanel } from "@/components/editor/AssetPanel";
 import { CanvasStage } from "@/components/editor/CanvasStage";
 import { PropertyPanel } from "@/components/editor/PropertyPanel";
 import { Toolbar } from "@/components/editor/Toolbar";
+import { TemplatePreviewBar } from "@/components/editor/TemplatePreviewBar";
 import { useEditorStore } from "@/store/editorStore";
 
 export function EditorWorkspace() {
@@ -24,6 +25,7 @@ export function EditorWorkspace() {
       {isAssetPanelOpen ? <AssetPanel /> : null}
       <section className="stage-region">
         <CanvasStage />
+        <TemplatePreviewBar />
       </section>
       {isInspectorOpen ? <PropertyPanel /> : null}
     </main>

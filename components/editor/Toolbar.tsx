@@ -15,12 +15,16 @@ export function Toolbar() {
   const isInspectorOpen = useEditorStore((state) => state.isInspectorOpen);
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const toggleInspector = useEditorStore((state) => state.toggleInspector);
+  const canUndo = useEditorStore((state) => state.historyPast.length > 0);
+  const canRedo = useEditorStore((state) => state.historyFuture.length > 0);
   const {
     deleteSelection,
     duplicateSelection,
     moveSelectionBackward,
     moveSelectionForward,
     exportPng,
+    undo,
+    redo,
   } = useEditorCommands();
   const hasSelection = Boolean(selectedObjectId);
 
@@ -50,6 +54,24 @@ export function Toolbar() {
           </button>
         </div>
         <div className="toolbar-command-group" aria-label="Canvas commands">
+          <button
+            className="icon-button"
+            disabled={!canUndo}
+            aria-label="Undo"
+            title="Undo"
+            onClick={() => void undo()}
+          >
+            ↶
+          </button>
+          <button
+            className="icon-button"
+            disabled={!canRedo}
+            aria-label="Redo"
+            title="Redo"
+            onClick={() => void redo()}
+          >
+            ↷
+          </button>
           <button
             className="icon-button"
             disabled={!hasSelection}

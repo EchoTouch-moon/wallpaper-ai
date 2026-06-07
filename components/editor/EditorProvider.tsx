@@ -20,6 +20,8 @@ import {
   calculateCropPan,
 } from "@/lib/fabric/crop";
 import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
+import { applyLayoutToCanvas } from "@/lib/fabric/applyLayout";
+import { serializeCanvasLayout } from "@/lib/fabric/serializeLayout";
 import { snapObjectToGeometry } from "@/lib/fabric/snapping";
 import { useEditorStore } from "@/store/editorStore";
 import type { ImageAsset } from "@/types/asset";
@@ -27,12 +29,18 @@ import type {
   CanvasObjectSnapshot,
   CropAspectId,
 } from "@/types/canvas";
+import type { WallpaperLayout } from "@/types/layout";
+import type { WallpaperItem } from "@/types/layout";
 
 interface EditorFabricObject extends FabricObject {
   objectId?: string;
   assetId?: string;
   role?: "hero" | "support" | "background";
   cropAspect?: CropAspectId;
+  slotId?: string;
+  layoutCrop?: WallpaperItem["crop"];
+  layoutStyle?: WallpaperItem["style"];
+  layoutMask?: WallpaperItem["mask"];
 }
 
 interface CropDragState {
@@ -68,12 +76,24 @@ export interface EditorCommands {
   applyCropPreset: (aspectId: CropAspectId) => void;
   finishCrop: () => void;
   resetCrop: () => void;
+  applyLayout: (layout: WallpaperLayout, addToHistory?: boolean) => Promise<void>;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
   exportPng: () => Promise<void>;
 }
 
 const EditorContext = createContext<EditorCommands | null>(null);
 
-FabricObject.customProperties = ["objectId", "assetId", "role", "cropAspect"];
+FabricObject.customProperties = [
+  "objectId",
+  "assetId",
+  "role",
+  "cropAspect",
+  "slotId",
+  "layoutCrop",
+  "layoutStyle",
+  "layoutMask",
+];
 
 const CROP_ASPECTS: Record<Exclude<CropAspectId, "free">, number> = {
   "16:9": 16 / 9,
@@ -108,6 +128,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
   const canvasRef = useRef<FabricCanvas | null>(null);
   const boundCanvasRef = useRef<FabricCanvas | null>(null);
   const cropDragRef = useRef<CropDragState | null>(null);
+  const isApplyingLayoutRef = useRef(false);
   const notice = useEditorStore((state) => state.notice);
   const setNotice = useEditorStore((state) => state.setNotice);
 
@@ -123,6 +144,14 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
           return (object as EditorFabricObject).role === "background";
         }) ?? false,
     });
+  }, []);
+
+  const commitCurrentCanvasLayout = useCallback(() => {
+    const canvas = canvasRef.current;
+    const state = useEditorStore.getState();
+    if (canvas && state.currentLayout && !isApplyingLayoutRef.current) {
+      state.commitLayout(serializeCanvasLayout(canvas, state.currentLayout));
+    }
   }, []);
 
   const finishCrop = useCallback(() => {
@@ -155,7 +184,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     });
     canvas?.requestRenderAll();
     syncCanvasState();
-  }, [syncCanvasState]);
+    commitCurrentCanvasLayout();
+  }, [commitCurrentCanvasLayout, syncCanvasState]);
 
   const handleSelectionChange = useCallback(() => {
     const canvas = canvasRef.current;
@@ -244,7 +274,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       horizontal: [],
     });
     syncCanvasState();
-  }, [syncCanvasState]);
+    commitCurrentCanvasLayout();
+  }, [commitCurrentCanvasLayout, syncCanvasState]);
 
   const fitBackdropToCanvas = useCallback((backdrop: FabricImage) => {
     const { canvasSize } = useEditorStore.getState();
@@ -338,7 +369,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     canvas.setActiveObject(image);
     canvas.requestRenderAll();
     syncCanvasState();
-  }, [syncCanvasState]);
+    commitCurrentCanvasLayout();
+  }, [commitCurrentCanvasLayout, syncCanvasState]);
 
   const removeAsset = useCallback(
     (assetId: string) => {
@@ -396,7 +428,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     canvas.remove(...activeObjects);
     canvas.requestRenderAll();
     syncCanvasState();
-  }, [finishCrop, syncCanvasState]);
+    commitCurrentCanvasLayout();
+  }, [commitCurrentCanvasLayout, finishCrop, syncCanvasState]);
 
   const duplicateSelection = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -420,7 +453,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     canvas.setActiveObject(clone);
     canvas.requestRenderAll();
     syncCanvasState();
-  }, [syncCanvasState]);
+    commitCurrentCanvasLayout();
+  }, [commitCurrentCanvasLayout, syncCanvasState]);
 
   const moveSelectionForward = useCallback(() => {
     const canvas = canvasRef.current;
@@ -429,8 +463,9 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       canvas.bringObjectForward(activeObject);
       canvas.requestRenderAll();
       syncCanvasState();
+      commitCurrentCanvasLayout();
     }
-  }, [syncCanvasState]);
+  }, [commitCurrentCanvasLayout, syncCanvasState]);
 
   const moveSelectionBackward = useCallback(() => {
     const canvas = canvasRef.current;
@@ -439,8 +474,9 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       canvas.sendObjectBackwards(activeObject);
       canvas.requestRenderAll();
       syncCanvasState();
+      commitCurrentCanvasLayout();
     }
-  }, [syncCanvasState]);
+  }, [commitCurrentCanvasLayout, syncCanvasState]);
 
   const nudgeSelection = useCallback(
     (x: number, y: number) => {
@@ -478,6 +514,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         });
         canvas.requestRenderAll();
         syncCanvasState();
+        commitCurrentCanvasLayout();
         return;
       }
 
@@ -488,8 +525,9 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       activeObject.setCoords();
       canvas.requestRenderAll();
       syncCanvasState();
+      commitCurrentCanvasLayout();
     },
-    [syncCanvasState],
+    [commitCurrentCanvasLayout, syncCanvasState],
   );
 
   const clearSelection = useCallback(() => {
@@ -665,7 +703,68 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     canvas.requestRenderAll();
     syncCanvasState();
     useEditorStore.getState().setNotice("Crop reset");
-  }, [finishCrop, syncCanvasState]);
+    commitCurrentCanvasLayout();
+  }, [commitCurrentCanvasLayout, finishCrop, syncCanvasState]);
+
+  const applyLayout = useCallback(
+    async (layout: WallpaperLayout, addToHistory = true) => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      isApplyingLayoutRef.current = true;
+      try {
+        await applyLayoutToCanvas(
+          canvas,
+          layout,
+          useEditorStore.getState().assets,
+        );
+        useEditorStore.getState().commitLayout(layout, addToHistory);
+        syncCanvasState();
+        useEditorStore.getState().setNotice(`${layout.template?.id ?? "Layout"} applied`);
+      } catch {
+        useEditorStore.getState().setNotice("Could not apply this layout");
+      } finally {
+        isApplyingLayoutRef.current = false;
+      }
+    },
+    [syncCanvasState],
+  );
+
+  const undo = useCallback(async () => {
+    const layout = useEditorStore.getState().undoLayout();
+    if (layout === null) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        isApplyingLayoutRef.current = true;
+        canvas.discardActiveObject();
+        canvas.remove(...canvas.getObjects());
+        canvas.requestRenderAll();
+        syncCanvasState();
+        isApplyingLayoutRef.current = false;
+      }
+    } else if (layout) {
+      await applyLayout(layout, false);
+    }
+  }, [applyLayout, syncCanvasState]);
+
+  const redo = useCallback(async () => {
+    const layout = useEditorStore.getState().redoLayout();
+    if (layout === null) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        isApplyingLayoutRef.current = true;
+        canvas.discardActiveObject();
+        canvas.remove(...canvas.getObjects());
+        canvas.requestRenderAll();
+        syncCanvasState();
+        isApplyingLayoutRef.current = false;
+      }
+    } else if (layout) {
+      await applyLayout(layout, false);
+    }
+  }, [applyLayout, syncCanvasState]);
 
   const exportPng = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -766,6 +865,16 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         return;
       }
 
+      if (commandKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          void redo();
+        } else {
+          void undo();
+        }
+        return;
+      }
+
       if (commandKey && event.key === "]") {
         event.preventDefault();
         moveSelectionForward();
@@ -801,6 +910,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     moveSelectionBackward,
     moveSelectionForward,
     nudgeSelection,
+    redo,
+    undo,
   ]);
 
   useEffect(() => {
@@ -837,11 +948,15 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       applyCropPreset,
       finishCrop,
       resetCrop,
+      applyLayout,
+      undo,
+      redo,
       exportPng,
     }),
     [
       addImage,
       applyCropPreset,
+      applyLayout,
       deleteSelection,
       duplicateSelection,
       exportPng,
@@ -853,8 +968,10 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       nudgeSelection,
       registerCanvas,
       resetCrop,
+      redo,
       removeBackdrop,
       removeAsset,
+      undo,
     ],
   );
 
