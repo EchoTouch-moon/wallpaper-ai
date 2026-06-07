@@ -1,3 +1,5 @@
+import type { ImageAssetAnalysis } from "@/types/layout";
+
 export interface ImageAsset {
   id: string;
   name: string;
@@ -6,10 +8,12 @@ export interface ImageAsset {
   width: number;
   height: number;
   aspectRatio: number;
+  mimeType: string;
+  analysis: ImageAssetAnalysis;
   metadata: {
     orientation: "landscape" | "portrait" | "square";
-    quality?: number;
-    dominantColors?: string[];
+    quality: number;
+    dominantColors: string[];
     bestUse?: "hero-or-background" | "support";
   };
 }

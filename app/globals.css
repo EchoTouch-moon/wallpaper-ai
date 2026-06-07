@@ -676,6 +676,41 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.asset-copy {
+  min-width: 0;
+  display: grid;
+  flex: 1;
+  gap: 2px;
+}
+
+.asset-copy > span {
+  overflow: hidden;
+  color: var(--editor-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-copy small {
+  color: var(--editor-muted);
+  font: 500 7px/1.2 var(--font-mono);
+  text-transform: uppercase;
+}
+
+.asset-swatches {
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.asset-swatches i {
+  width: 8px;
+  height: 8px;
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  margin-left: -2px;
+  box-shadow: 0 1px 3px rgba(43, 62, 75, 0.16);
+}
+
 .asset-details button {
   width: 20px;
   height: 20px;

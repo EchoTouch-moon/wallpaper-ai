@@ -1,4 +1,5 @@
 import type { ImageAsset } from "@/types/asset";
+import { analyzeImage } from "@/lib/image/analyzeImage";
 
 const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -32,16 +33,27 @@ export async function createImageAsset(file: File): Promise<ImageAsset> {
 
   try {
     const { width, height } = await loadImageDimensions(objectUrl);
+    const id = `asset_${crypto.randomUUID()}`;
+    const analysis = await analyzeImage(id, objectUrl, width, height);
     return {
-      id: `asset_${crypto.randomUUID()}`,
+      id,
       name: file.name,
       objectUrl,
       thumbnailUrl: objectUrl,
       width,
       height,
       aspectRatio: width / height,
+      mimeType: file.type,
+      analysis,
       metadata: {
         orientation: getOrientation(width, height),
+        quality: analysis.resolutionScore,
+        dominantColors: analysis.dominantColors,
+        bestUse:
+          analysis.bestUse?.includes("hero") ||
+          analysis.bestUse?.includes("background")
+            ? "hero-or-background"
+            : "support",
       },
     };
   } catch (error) {

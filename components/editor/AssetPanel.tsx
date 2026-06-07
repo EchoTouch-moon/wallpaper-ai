@@ -95,7 +95,22 @@ export function AssetPanel() {
                 <span>Add to canvas</span>
               </button>
               <div className="asset-details">
-                <span title={asset.name}>{asset.name}</span>
+                <div className="asset-copy">
+                  <span title={asset.name}>{asset.name}</span>
+                  <small>
+                    {asset.analysis.orientation} · Q
+                    {Math.round(asset.analysis.resolutionScore * 100)}
+                  </small>
+                </div>
+                <div className="asset-swatches" aria-label="Dominant colors">
+                  {asset.analysis.dominantColors.map((color, index) => (
+                    <i
+                      key={`${color}-${index}`}
+                      title={color}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
                 <button
                   type="button"
                   aria-label={`Remove ${asset.name}`}
