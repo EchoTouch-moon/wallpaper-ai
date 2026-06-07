@@ -10,12 +10,58 @@ interface SnapResult {
   guide?: number;
 }
 
+export interface AxisSnapLock {
+  anchorIndex: number;
+  guide: number;
+}
+
+export interface SnapSession {
+  target: FabricObject | null;
+  x: AxisSnapLock | null;
+  y: AxisSnapLock | null;
+}
+
 interface SnappableObject extends FabricObject {
   role?: "hero" | "support" | "background";
 }
 
+const SNAP_THRESHOLD_PX = 8;
+const SNAP_RELEASE_THRESHOLD_PX = 14;
+
 function getAxisAnchors(start: number, size: number) {
   return [start, start + size / 2, start + size];
+}
+
+function findClosestSnapMatch(
+  anchors: number[],
+  candidates: SnapCandidate[],
+  threshold: number,
+) {
+  let closest:
+    | {
+        anchorIndex: number;
+        delta: number;
+        guide: number;
+      }
+    | undefined;
+  let closestDistance = threshold;
+
+  anchors.forEach((anchor, anchorIndex) => {
+    candidates.forEach((candidate) => {
+      const delta = candidate.value - anchor;
+      const distance = Math.abs(delta);
+      if (distance < closestDistance) {
+        closest = {
+          anchorIndex,
+          delta,
+          guide: candidate.value,
+        };
+        closestDistance = distance;
+      }
+    });
+  });
+
+  return closest;
 }
 
 export function findClosestSnap(
@@ -23,21 +69,71 @@ export function findClosestSnap(
   candidates: SnapCandidate[],
   threshold: number,
 ): SnapResult {
-  let closest: SnapResult = { delta: 0 };
-  let closestDistance = threshold;
+  const closest = findClosestSnapMatch(anchors, candidates, threshold);
+  return closest
+    ? { delta: closest.delta, guide: closest.guide }
+    : { delta: 0 };
+}
 
-  for (const anchor of anchors) {
-    for (const candidate of candidates) {
-      const delta = candidate.value - anchor;
-      const distance = Math.abs(delta);
-      if (distance < closestDistance) {
-        closest = { delta, guide: candidate.value };
-        closestDistance = distance;
-      }
+export function resolveAxisSnap(
+  anchors: number[],
+  candidates: SnapCandidate[],
+  threshold: number,
+  releaseThreshold: number,
+  lock: AxisSnapLock | null,
+) {
+  if (lock) {
+    const lockedAnchor = anchors[lock.anchorIndex];
+    if (
+      lockedAnchor !== undefined &&
+      Math.abs(lock.guide - lockedAnchor) <= releaseThreshold
+    ) {
+      return {
+        result: {
+          delta: lock.guide - lockedAnchor,
+          guide: lock.guide,
+        },
+        lock,
+      };
     }
   }
 
-  return closest;
+  const closest = findClosestSnapMatch(anchors, candidates, threshold);
+  if (!closest) {
+    return {
+      result: { delta: 0 },
+      lock: null,
+    };
+  }
+
+  const nextLock = {
+    anchorIndex: closest.anchorIndex,
+    guide: closest.guide,
+  };
+  return {
+    result: {
+      delta: closest.delta,
+      guide: closest.guide,
+    },
+    lock: nextLock,
+  };
+}
+
+export function createSnapSession(): SnapSession {
+  return {
+    target: null,
+    x: null,
+    y: null,
+  };
+}
+
+export function resetSnapSession(
+  session: SnapSession,
+  target: FabricObject | null = null,
+) {
+  session.target = target;
+  session.x = null;
+  session.y = null;
 }
 
 export function snapObjectToGeometry(
@@ -45,7 +141,12 @@ export function snapObjectToGeometry(
   target: FabricObject,
   documentWidth: number,
   documentHeight: number,
+  session: SnapSession,
 ): SnapGuides {
+  if (session.target !== target) {
+    resetSnapSession(session, target);
+  }
+
   const xCandidates: SnapCandidate[] = [
     { value: 0 },
     { value: documentWidth / 2 },
@@ -78,17 +179,27 @@ export function snapObjectToGeometry(
   });
 
   const bounds = target.getBoundingRect();
-  const threshold = 8 / Math.max(canvas.getZoom(), 0.01);
-  const xSnap = findClosestSnap(
+  const zoom = Math.max(canvas.getZoom(), 0.01);
+  const threshold = SNAP_THRESHOLD_PX / zoom;
+  const releaseThreshold = SNAP_RELEASE_THRESHOLD_PX / zoom;
+  const xState = resolveAxisSnap(
     getAxisAnchors(bounds.left, bounds.width),
     xCandidates,
     threshold,
+    releaseThreshold,
+    session.x,
   );
-  const ySnap = findClosestSnap(
+  const yState = resolveAxisSnap(
     getAxisAnchors(bounds.top, bounds.height),
     yCandidates,
     threshold,
+    releaseThreshold,
+    session.y,
   );
+  const xSnap = xState.result;
+  const ySnap = yState.result;
+  session.x = xState.lock;
+  session.y = yState.lock;
 
   if (xSnap.guide !== undefined || ySnap.guide !== undefined) {
     target.set({

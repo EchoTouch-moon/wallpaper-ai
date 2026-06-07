@@ -22,7 +22,11 @@ import {
 import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
 import { applyLayoutToCanvas } from "@/lib/fabric/applyLayout";
 import { serializeCanvasLayout } from "@/lib/fabric/serializeLayout";
-import { snapObjectToGeometry } from "@/lib/fabric/snapping";
+import {
+  createSnapSession,
+  resetSnapSession,
+  snapObjectToGeometry,
+} from "@/lib/fabric/snapping";
 import {
   deleteStoredAsset,
   loadProjectDraft,
@@ -134,6 +138,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
   const boundCanvasRef = useRef<FabricCanvas | null>(null);
   const cropDragRef = useRef<CropDragState | null>(null);
   const isApplyingLayoutRef = useRef(false);
+  const snapSessionRef = useRef(createSnapSession());
   const pendingRestoreRef = useRef<WallpaperLayout | null>(null);
   const projectCreatedAtRef = useRef(new Date().toISOString());
   const notice = useEditorStore((state) => state.notice);
@@ -213,6 +218,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       vertical: [],
       horizontal: [],
     });
+    resetSnapSession(snapSessionRef.current);
     canvas?.requestRenderAll();
     syncCanvasState();
     commitCurrentCanvasLayout();
@@ -279,6 +285,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
           vertical: [],
           horizontal: [],
         });
+        resetSnapSession(snapSessionRef.current);
       } else {
         const { canvasSize } = useEditorStore.getState();
         useEditorStore
@@ -289,6 +296,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
               target,
               canvasSize.width,
               canvasSize.height,
+              snapSessionRef.current,
             ),
           );
       }
@@ -300,6 +308,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
   );
 
   const handleObjectModified = useCallback(() => {
+    resetSnapSession(snapSessionRef.current);
     useEditorStore.getState().setSnapGuides({
       vertical: [],
       horizontal: [],
@@ -349,6 +358,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         canvas.on("object:moving", handleObjectMoving);
         canvas.on("object:scaling", syncCanvasState);
         canvas.on("object:rotating", syncCanvasState);
+      } else {
+        resetSnapSession(snapSessionRef.current);
       }
 
       syncCanvasState();
