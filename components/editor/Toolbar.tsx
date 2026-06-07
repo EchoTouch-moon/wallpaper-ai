@@ -17,6 +17,8 @@ export function Toolbar() {
   const toggleInspector = useEditorStore((state) => state.toggleInspector);
   const canUndo = useEditorStore((state) => state.historyPast.length > 0);
   const canRedo = useEditorStore((state) => state.historyFuture.length > 0);
+  const showSafeAreas = useEditorStore((state) => state.showSafeAreas);
+  const toggleSafeAreas = useEditorStore((state) => state.toggleSafeAreas);
   const {
     deleteSelection,
     duplicateSelection,
@@ -123,6 +125,14 @@ export function Toolbar() {
             ))}
           </select>
         </label>
+        <button
+          className={`icon-button ${showSafeAreas ? "is-active" : ""}`}
+          aria-label="Toggle safe areas"
+          title="Toggle wallpaper safe areas"
+          onClick={toggleSafeAreas}
+        >
+          ◫
+        </button>
         <button
           className="toolbar-button"
           disabled={!isCanvasReady || exportStatus === "exporting"}

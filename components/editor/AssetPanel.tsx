@@ -3,6 +3,7 @@
 import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { createImageAsset } from "@/lib/image/extractMetadata";
+import { saveAssetBlob } from "@/lib/storage/projectDatabase";
 import { useEditorStore } from "@/store/editorStore";
 
 export function AssetPanel() {
@@ -14,14 +15,28 @@ export function AssetPanel() {
   const { addImage, removeAsset } = useEditorCommands();
 
   const processFiles = async (files: FileList | File[]) => {
-    const results = await Promise.allSettled(Array.from(files).map(createImageAsset));
-    const validAssets = results.flatMap((result) =>
-      result.status === "fulfilled" ? [result.value] : [],
+    const fileList = Array.from(files);
+    const results = await Promise.allSettled(fileList.map(createImageAsset));
+    const validEntries = results.flatMap((result, index) =>
+      result.status === "fulfilled"
+        ? [{ asset: result.value, file: fileList[index] }]
+        : [],
     );
+    const validAssets = validEntries.map((entry) => entry.asset);
 
     if (validAssets.length > 0) {
+      const storageResults = await Promise.allSettled(
+        validEntries.map(({ asset, file }) => saveAssetBlob(asset, file)),
+      );
       addAssets(validAssets);
-      setNotice(`${validAssets.length} photo${validAssets.length > 1 ? "s" : ""} added`);
+      const storageFailures = storageResults.filter(
+        (result) => result.status === "rejected",
+      ).length;
+      setNotice(
+        storageFailures > 0
+          ? "Photos added, but local saving is unavailable"
+          : `${validAssets.length} photo${validAssets.length > 1 ? "s" : ""} added`,
+      );
     }
 
     const rejectedCount = results.length - validAssets.length;

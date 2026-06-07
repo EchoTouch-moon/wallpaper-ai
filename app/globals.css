@@ -1077,6 +1077,54 @@ input:focus-visible {
   height: 1px;
 }
 
+.safe-area-layer {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.safe-area {
+  position: absolute;
+  display: block;
+  border: 1px dashed rgba(255, 144, 63, 0.82);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 154, 72, 0.08) 0,
+      rgba(255, 154, 72, 0.08) 5px,
+      transparent 5px,
+      transparent 10px
+    );
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.36);
+}
+
+.safe-area.mobile-clock,
+.safe-area.mobile-widget-center {
+  border-color: rgba(57, 176, 194, 0.82);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(57, 176, 194, 0.08) 0,
+      rgba(57, 176, 194, 0.08) 5px,
+      transparent 5px,
+      transparent 10px
+    );
+}
+
+.safe-area span {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  border-radius: 999px;
+  padding: 3px 5px;
+  color: rgba(83, 57, 35, 0.86);
+  background: rgba(255, 248, 239, 0.84);
+  font: 600 6px/1 var(--font-mono);
+  text-transform: uppercase;
+}
+
 .crop-mode-badge {
   position: absolute;
   top: 14px;

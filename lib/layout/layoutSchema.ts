@@ -282,14 +282,55 @@ export const layoutCandidateSchema = z.object({
   layout: wallpaperLayoutSchema,
 });
 
-export const editorProjectSchema = z.object({
-  version: z.literal("1.0"),
-  id: z.string().min(1),
-  name: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  assetIds: z.array(z.string()),
-  analyses: z.array(imageAssetAnalysisSchema),
-  candidates: z.array(layoutCandidateSchema),
-  currentLayout: wallpaperLayoutSchema.nullable(),
-});
+export const editorProjectSchema = z
+  .object({
+    version: z.literal("1.0"),
+    id: z.string().min(1),
+    name: z.string().min(1),
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+    ratioId: z.enum(["16:9", "16:10", "21:9", "9:16", "9:19.5"]),
+    assetIds: z.array(z.string()),
+    analyses: z.array(imageAssetAnalysisSchema),
+    candidates: z.array(layoutCandidateSchema),
+    currentLayout: wallpaperLayoutSchema.nullable(),
+  })
+  .superRefine((project, context) => {
+    const assetIds = new Set<string>();
+    project.assetIds.forEach((assetId, index) => {
+      if (assetIds.has(assetId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate asset id: ${assetId}`,
+          path: ["assetIds", index],
+        });
+      }
+      assetIds.add(assetId);
+    });
+
+    project.analyses.forEach((analysis, index) => {
+      if (!assetIds.has(analysis.assetId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Analysis references unknown asset: ${analysis.assetId}`,
+          path: ["analyses", index, "assetId"],
+        });
+      }
+    });
+
+    const layouts = [
+      ...project.candidates.map((candidate) => candidate.layout),
+      ...(project.currentLayout ? [project.currentLayout] : []),
+    ];
+    layouts.forEach((layout, layoutIndex) => {
+      layout.items.forEach((item, itemIndex) => {
+        if (!assetIds.has(item.assetId)) {
+          context.addIssue({
+            code: "custom",
+            message: `Layout references unknown asset: ${item.assetId}`,
+            path: ["layouts", layoutIndex, "items", itemIndex, "assetId"],
+          });
+        }
+      });
+    });
+  });

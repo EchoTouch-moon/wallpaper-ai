@@ -4,7 +4,9 @@ import { useEffect, useRef } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { initCanvas, resizeCanvasPreview } from "@/lib/fabric/initCanvas";
+import { SAFE_AREA_LABELS } from "@/lib/wallpaper/safeAreas";
 import { useEditorStore } from "@/store/editorStore";
+import { createSafeAreas } from "@/lib/wallpaper/layoutSafeAreas";
 
 const STAGE_PADDING = 40;
 
@@ -19,6 +21,12 @@ export function CanvasStage() {
   const setPreviewScale = useEditorStore((state) => state.setPreviewScale);
   const snapGuides = useEditorStore((state) => state.snapGuides);
   const cropSession = useEditorStore((state) => state.cropSession);
+  const currentLayout = useEditorStore((state) => state.currentLayout);
+  const ratioId = useEditorStore((state) => state.ratioId);
+  const showSafeAreas = useEditorStore((state) => state.showSafeAreas);
+  const safeAreas =
+    currentLayout?.safeAreas ??
+    createSafeAreas(ratioId, canvasSize.width, canvasSize.height);
 
   useEffect(() => {
     const canvasElement = canvasElementRef.current;
@@ -87,6 +95,24 @@ export function CanvasStage() {
             />
           ))}
         </div>
+        {showSafeAreas ? (
+          <div className="safe-area-layer" aria-hidden="true">
+            {safeAreas.map((area) => (
+              <i
+                className={`safe-area ${area.type}`}
+                key={area.id}
+                style={{
+                  left: `${(area.x / canvasSize.width) * 100}%`,
+                  top: `${(area.y / canvasSize.height) * 100}%`,
+                  width: `${(area.width / canvasSize.width) * 100}%`,
+                  height: `${(area.height / canvasSize.height) * 100}%`,
+                }}
+              >
+                <span>{SAFE_AREA_LABELS[area.type]}</span>
+              </i>
+            ))}
+          </div>
+        ) : null}
       </div>
       {cropSession ? (
         <div className="crop-mode-badge" role="status">

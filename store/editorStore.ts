@@ -14,6 +14,7 @@ import type {
 } from "@/types/canvas";
 import type {
   CompositionIntent,
+  EditorProject,
   LayoutCandidate,
   WallpaperLayout,
 } from "@/types/layout";
@@ -41,6 +42,8 @@ interface EditorState {
   currentLayout: WallpaperLayout | null;
   historyPast: Array<WallpaperLayout | null>;
   historyFuture: Array<WallpaperLayout | null>;
+  showSafeAreas: boolean;
+  isProjectHydrated: boolean;
   setRatio: (ratioId: WallpaperRatioId) => void;
   addAssets: (assets: ImageAsset[]) => void;
   removeAsset: (assetId: string) => void;
@@ -66,6 +69,9 @@ interface EditorState {
   commitLayout: (layout: WallpaperLayout, addToHistory?: boolean) => void;
   undoLayout: () => WallpaperLayout | null | undefined;
   redoLayout: () => WallpaperLayout | null | undefined;
+  toggleSafeAreas: () => void;
+  hydrateProject: (assets: ImageAsset[], project: EditorProject) => void;
+  markProjectHydrated: () => void;
   resetEditor: () => void;
 }
 
@@ -96,6 +102,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   currentLayout: null,
   historyPast: [],
   historyFuture: [],
+  showSafeAreas: true,
+  isProjectHydrated: false,
   setRatio: (ratioId) => {
     const ratio = getRatioPreset(ratioId);
     set({
@@ -113,6 +121,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   removeAsset: (assetId) =>
     set((state) => ({
       assets: state.assets.filter((asset) => asset.id !== assetId),
+      candidates: state.candidates.filter((candidate) =>
+        candidate.layout.items.every((item) => item.assetId !== assetId),
+      ),
     })),
   setCanvasSnapshot: ({ objectCount, selectedObject, hasBackdrop }) =>
     set({
@@ -194,6 +205,22 @@ export const useEditorStore = create<EditorState>((set) => ({
     });
     return target;
   },
+  toggleSafeAreas: () =>
+    set((state) => ({ showSafeAreas: !state.showSafeAreas })),
+  hydrateProject: (assets, project) => {
+    const ratio = getRatioPreset(project.ratioId);
+    set({
+      ratioId: project.ratioId,
+      canvasSize: { width: ratio.width, height: ratio.height },
+      assets,
+      candidates: project.candidates,
+      currentLayout: project.currentLayout,
+      historyPast: [],
+      historyFuture: [],
+      isProjectHydrated: true,
+    });
+  },
+  markProjectHydrated: () => set({ isProjectHydrated: true }),
   resetEditor: () =>
     set({
       assets: [],
@@ -210,5 +237,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       currentLayout: null,
       historyPast: [],
       historyFuture: [],
+      showSafeAreas: true,
+      isProjectHydrated: false,
     }),
 }));

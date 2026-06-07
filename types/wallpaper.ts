@@ -11,6 +11,7 @@ export type SafeAreaType =
   | "desktop-icons-right"
   | "desktop-dock"
   | "mobile-clock"
+  | "mobile-widget-center"
   | "subject-protection";
 
 export interface SafeArea {

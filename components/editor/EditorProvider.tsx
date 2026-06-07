@@ -23,14 +23,19 @@ import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
 import { applyLayoutToCanvas } from "@/lib/fabric/applyLayout";
 import { serializeCanvasLayout } from "@/lib/fabric/serializeLayout";
 import { snapObjectToGeometry } from "@/lib/fabric/snapping";
+import {
+  deleteStoredAsset,
+  loadProjectDraft,
+  saveProjectDraft,
+} from "@/lib/storage/projectDatabase";
+import { createProjectSnapshot } from "@/lib/storage/projectSnapshot";
 import { useEditorStore } from "@/store/editorStore";
 import type { ImageAsset } from "@/types/asset";
 import type {
   CanvasObjectSnapshot,
   CropAspectId,
 } from "@/types/canvas";
-import type { WallpaperLayout } from "@/types/layout";
-import type { WallpaperItem } from "@/types/layout";
+import type { WallpaperItem, WallpaperLayout } from "@/types/layout";
 
 interface EditorFabricObject extends FabricObject {
   objectId?: string;
@@ -129,6 +134,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
   const boundCanvasRef = useRef<FabricCanvas | null>(null);
   const cropDragRef = useRef<CropDragState | null>(null);
   const isApplyingLayoutRef = useRef(false);
+  const pendingRestoreRef = useRef<WallpaperLayout | null>(null);
+  const projectCreatedAtRef = useRef(new Date().toISOString());
   const notice = useEditorStore((state) => state.notice);
   const setNotice = useEditorStore((state) => state.setNotice);
 
@@ -145,6 +152,30 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         }) ?? false,
     });
   }, []);
+
+  const renderLayoutOnCanvas = useCallback(
+    async (layout: WallpaperLayout) => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        pendingRestoreRef.current = layout;
+        return false;
+      }
+
+      isApplyingLayoutRef.current = true;
+      try {
+        await applyLayoutToCanvas(
+          canvas,
+          layout,
+          useEditorStore.getState().assets,
+        );
+        syncCanvasState();
+        return true;
+      } finally {
+        isApplyingLayoutRef.current = false;
+      }
+    },
+    [syncCanvasState],
+  );
 
   const commitCurrentCanvasLayout = useCallback(() => {
     const canvas = canvasRef.current;
@@ -321,11 +352,21 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       }
 
       syncCanvasState();
+
+      const pendingLayout = pendingRestoreRef.current;
+      if (canvas && pendingLayout) {
+        pendingRestoreRef.current = null;
+        void renderLayoutOnCanvas(pendingLayout).catch(() => {
+          setNotice("Could not restore the saved canvas");
+        });
+      }
     },
     [
       handleObjectModified,
       handleObjectMoving,
       handleSelectionChange,
+      renderLayoutOnCanvas,
+      setNotice,
       syncCanvasState,
     ],
   );
@@ -398,10 +439,15 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       if (asset) {
         URL.revokeObjectURL(asset.objectUrl);
       }
+
+      void deleteStoredAsset(assetId).catch(() => {
+        useEditorStore.getState().setNotice("Could not update local storage");
+      });
       useEditorStore.getState().removeAsset(assetId);
       syncCanvasState();
+      commitCurrentCanvasLayout();
     },
-    [finishCrop, syncCanvasState],
+    [commitCurrentCanvasLayout, finishCrop, syncCanvasState],
   );
 
   const deleteSelection = useCallback(() => {
@@ -708,28 +754,22 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
 
   const applyLayout = useCallback(
     async (layout: WallpaperLayout, addToHistory = true) => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
+      const rendered = await renderLayoutOnCanvas(layout).catch(() => false);
+      if (!rendered) {
+        if (!canvasRef.current) {
+          useEditorStore.getState().setNotice("Canvas is still loading");
+        } else {
+          useEditorStore.getState().setNotice("Could not apply this layout");
+        }
         return;
       }
 
-      isApplyingLayoutRef.current = true;
-      try {
-        await applyLayoutToCanvas(
-          canvas,
-          layout,
-          useEditorStore.getState().assets,
-        );
-        useEditorStore.getState().commitLayout(layout, addToHistory);
-        syncCanvasState();
-        useEditorStore.getState().setNotice(`${layout.template?.id ?? "Layout"} applied`);
-      } catch {
-        useEditorStore.getState().setNotice("Could not apply this layout");
-      } finally {
-        isApplyingLayoutRef.current = false;
-      }
+      useEditorStore.getState().commitLayout(layout, addToHistory);
+      useEditorStore
+        .getState()
+        .setNotice(`${layout.template?.id ?? "Layout"} applied`);
     },
-    [syncCanvasState],
+    [renderLayoutOnCanvas],
   );
 
   const undo = useCallback(async () => {
@@ -765,6 +805,95 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       await applyLayout(layout, false);
     }
   }, [applyLayout, syncCanvasState]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    void loadProjectDraft()
+      .then(async (restored) => {
+        if (isCancelled) {
+          restored?.assets.forEach((asset) =>
+            URL.revokeObjectURL(asset.objectUrl),
+          );
+          return;
+        }
+
+        if (!restored) {
+          useEditorStore.getState().markProjectHydrated();
+          return;
+        }
+
+        projectCreatedAtRef.current = restored.project.createdAt;
+        useEditorStore
+          .getState()
+          .hydrateProject(restored.assets, restored.project);
+
+        if (restored.project.currentLayout) {
+          await renderLayoutOnCanvas(restored.project.currentLayout);
+        }
+
+        useEditorStore.getState().setNotice("Local draft restored");
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          useEditorStore.getState().markProjectHydrated();
+          useEditorStore
+            .getState()
+            .setNotice("Local draft storage is unavailable");
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [renderLayoutOnCanvas]);
+
+  useEffect(() => {
+    let timeout: number | undefined;
+    const unsubscribe = useEditorStore.subscribe((state, previousState) => {
+      if (!state.isProjectHydrated) {
+        return;
+      }
+
+      if (
+        state.ratioId === previousState.ratioId &&
+        state.assets === previousState.assets &&
+        state.candidates === previousState.candidates &&
+        state.currentLayout === previousState.currentLayout
+      ) {
+        return;
+      }
+
+      window.clearTimeout(timeout);
+      timeout = window.setTimeout(() => {
+        const latest = useEditorStore.getState();
+        try {
+          const snapshot = createProjectSnapshot({
+            createdAt: projectCreatedAtRef.current,
+            assets: latest.assets,
+            candidates: latest.candidates,
+            currentLayout: latest.currentLayout,
+            ratioId: latest.ratioId,
+          });
+
+          void saveProjectDraft(snapshot).catch(() => {
+            useEditorStore
+              .getState()
+              .setNotice("Could not save the local draft");
+          });
+        } catch {
+          useEditorStore
+            .getState()
+            .setNotice("The current draft could not be validated");
+        }
+      }, 800);
+    });
+
+    return () => {
+      unsubscribe();
+      window.clearTimeout(timeout);
+    };
+  }, []);
 
   const exportPng = useCallback(async () => {
     const canvas = canvasRef.current;

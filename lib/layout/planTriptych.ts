@@ -9,6 +9,7 @@ import type {
 } from "@/types/layout";
 import type { CanvasSize } from "@/types/canvas";
 import type { WallpaperRatioId } from "@/types/wallpaper";
+import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 
 function usageForRatio(ratioId: WallpaperRatioId) {
   if (ratioId === "9:16" || ratioId === "9:19.5") {
@@ -140,7 +141,7 @@ export function generateTriptychCandidates(
       },
       template: { id: template.id, type: template.type },
       items,
-      safeAreas: [],
+      safeAreas: createSafeAreas(ratioId, canvasSize.width, canvasSize.height),
       guidance: {
         intent: template.id.includes("editorial")
           ? "hero-with-support"
