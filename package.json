@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test": "node --test --experimental-strip-types lib/fabric/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

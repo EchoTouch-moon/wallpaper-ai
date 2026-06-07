@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { getRatioPreset } from "@/lib/wallpaper/ratios";
 import type { ImageAsset } from "@/types/asset";
-import type { CanvasObjectSnapshot, CanvasSize } from "@/types/canvas";
+import type {
+  CanvasObjectSnapshot,
+  CanvasSize,
+  CropSession,
+  SnapGuides,
+} from "@/types/canvas";
 import type { CompositionIntent } from "@/types/layout";
 import type { WallpaperRatioId } from "@/types/wallpaper";
 
@@ -13,6 +18,8 @@ interface EditorState {
   selectedObject: CanvasObjectSnapshot | null;
   objectCount: number;
   hasBackdrop: boolean;
+  snapGuides: SnapGuides;
+  cropSession: CropSession | null;
   previewScale: number;
   isCanvasReady: boolean;
   notice: string | null;
@@ -29,6 +36,8 @@ interface EditorState {
     selectedObject: CanvasObjectSnapshot | null;
     hasBackdrop: boolean;
   }) => void;
+  setSnapGuides: (guides: SnapGuides) => void;
+  setCropSession: (session: CropSession | null) => void;
   setPreviewScale: (scale: number) => void;
   setCanvasReady: (isReady: boolean) => void;
   setNotice: (notice: string | null) => void;
@@ -56,6 +65,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   selectedObject: null,
   objectCount: 0,
   hasBackdrop: false,
+  snapGuides: { vertical: [], horizontal: [] },
+  cropSession: null,
   previewScale: 1,
   isCanvasReady: false,
   notice: null,
@@ -88,6 +99,8 @@ export const useEditorStore = create<EditorState>((set) => ({
       selectedObjectId: selectedObject?.id || null,
       hasBackdrop,
     }),
+  setSnapGuides: (snapGuides) => set({ snapGuides }),
+  setCropSession: (cropSession) => set({ cropSession }),
   setPreviewScale: (previewScale) => set({ previewScale }),
   setCanvasReady: (isCanvasReady) => set({ isCanvasReady }),
   setNotice: (notice) => set({ notice }),
@@ -112,6 +125,8 @@ export const useEditorStore = create<EditorState>((set) => ({
       selectedObject: null,
       objectCount: 0,
       hasBackdrop: false,
+      snapGuides: { vertical: [], horizontal: [] },
+      cropSession: null,
       notice: null,
       exportStatus: "idle",
       exportError: null,

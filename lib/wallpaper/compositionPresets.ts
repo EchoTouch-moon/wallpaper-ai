@@ -27,6 +27,12 @@ export const COMPOSITION_PRESETS: CompositionPreset[] = [
     guidance: {
       intent: "single-hero",
       visualFlow: "center-out",
+      boundary: {
+        type: "edge-to-edge",
+        gap: 0,
+        radius: 0,
+        width: 0,
+      },
       transition: {
         type: "blurred-extension",
         strength: 0.78,
@@ -44,6 +50,12 @@ export const COMPOSITION_PRESETS: CompositionPreset[] = [
     guidance: {
       intent: "hero-with-support",
       visualFlow: "left-to-right",
+      boundary: {
+        type: "soft-shadow",
+        gap: 36,
+        radius: 28,
+        width: 0,
+      },
       transition: SOFT_GRADIENT,
       preserveFaces: true,
       preserveNegativeSpace: true,
@@ -57,6 +69,12 @@ export const COMPOSITION_PRESETS: CompositionPreset[] = [
     guidance: {
       intent: "balanced-collage",
       visualFlow: "center-out",
+      boundary: {
+        type: "clean-gap",
+        gap: 28,
+        radius: 18,
+        width: 0,
+      },
       transition: {
         type: "shared-color-wash",
         strength: 0.58,
@@ -74,6 +92,13 @@ export const COMPOSITION_PRESETS: CompositionPreset[] = [
     guidance: {
       intent: "story-strip",
       visualFlow: "left-to-right",
+      boundary: {
+        type: "hairline",
+        gap: 18,
+        radius: 12,
+        width: 2,
+        color: "#f4f3ed",
+      },
       transition: {
         type: "clean-gap",
         strength: 0.35,

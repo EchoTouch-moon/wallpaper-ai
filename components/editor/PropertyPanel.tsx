@@ -4,6 +4,16 @@ import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { COMPOSITION_PRESETS } from "@/lib/wallpaper/compositionPresets";
 import { useEditorStore } from "@/store/editorStore";
 import type { CompositionIntent } from "@/types/layout";
+import type { CropAspectId } from "@/types/canvas";
+
+const CROP_OPTIONS: Array<{ id: CropAspectId; label: string }> = [
+  { id: "free", label: "Choose crop ratio" },
+  { id: "16:9", label: "Landscape · 16:9" },
+  { id: "4:3", label: "Classic · 4:3" },
+  { id: "1:1", label: "Square · 1:1" },
+  { id: "3:4", label: "Portrait · 3:4" },
+  { id: "9:16", label: "Story · 9:16" },
+];
 
 export function PropertyPanel() {
   const canvasSize = useEditorStore((state) => state.canvasSize);
@@ -15,7 +25,14 @@ export function PropertyPanel() {
   const compositionIntent = useEditorStore((state) => state.compositionIntent);
   const setCompositionIntent = useEditorStore((state) => state.setCompositionIntent);
   const hasBackdrop = useEditorStore((state) => state.hasBackdrop);
-  const { createBlurredBackdrop, removeBackdrop } = useEditorCommands();
+  const cropSession = useEditorStore((state) => state.cropSession);
+  const {
+    applyCropPreset,
+    createBlurredBackdrop,
+    finishCrop,
+    removeBackdrop,
+    resetCrop,
+  } = useEditorCommands();
   const activeComposition =
     COMPOSITION_PRESETS.find((preset) => preset.id === compositionIntent) ??
     COMPOSITION_PRESETS[0];
@@ -40,6 +57,57 @@ export function PropertyPanel() {
           <span>Preview</span>
           <span className="property-value">{Math.round(previewScale * 100)}%</span>
         </div>
+      </section>
+      <section className="panel-section">
+        <span className="panel-label">Crop & framing</span>
+        <select
+          className="property-select"
+          value={selectedObject?.cropAspect ?? "free"}
+          disabled={!selectedObject?.assetId || selectedObject.role === "background"}
+          onChange={(event) => {
+            const aspect = event.target.value as CropAspectId;
+            if (aspect !== "free") {
+              applyCropPreset(aspect);
+            }
+          }}
+          aria-label="Crop ratio"
+        >
+          {CROP_OPTIONS.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <div className="crop-actions">
+          {cropSession && cropSession.objectId === selectedObject?.id ? (
+            <button type="button" onClick={finishCrop}>
+              Done cropping
+            </button>
+          ) : selectedObject?.cropAspect ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedObject.cropAspect) {
+                  applyCropPreset(selectedObject.cropAspect);
+                }
+              }}
+            >
+              Reframe crop
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="secondary"
+            disabled={!selectedObject?.isCropped}
+            onClick={resetCrop}
+          >
+            Reset
+          </button>
+        </div>
+        <p className="transition-help">
+          Apply a frame, then drag the photo inside the fixed crop window to choose
+          what remains visible.
+        </p>
       </section>
       <section className="panel-section">
         <span className="panel-label">Selection</span>

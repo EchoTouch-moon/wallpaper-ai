@@ -15,15 +15,42 @@ import {
   filters,
   type Canvas as FabricCanvas,
 } from "fabric";
+import {
+  calculateCropFrame,
+  calculateCropPan,
+} from "@/lib/fabric/crop";
 import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
+import { snapObjectToGeometry } from "@/lib/fabric/snapping";
 import { useEditorStore } from "@/store/editorStore";
 import type { ImageAsset } from "@/types/asset";
-import type { CanvasObjectSnapshot } from "@/types/canvas";
+import type {
+  CanvasObjectSnapshot,
+  CropAspectId,
+} from "@/types/canvas";
 
 interface EditorFabricObject extends FabricObject {
   objectId?: string;
   assetId?: string;
   role?: "hero" | "support" | "background";
+  cropAspect?: CropAspectId;
+}
+
+interface CropDragState {
+  objectId: string;
+  left: number;
+  top: number;
+}
+
+interface ObjectMovingEvent {
+  target: FabricObject;
+  transform?: {
+    original: {
+      left: number;
+      top: number;
+      cropX?: number;
+      cropY?: number;
+    };
+  };
 }
 
 export interface EditorCommands {
@@ -38,22 +65,36 @@ export interface EditorCommands {
   clearSelection: () => void;
   createBlurredBackdrop: () => Promise<void>;
   removeBackdrop: () => void;
+  applyCropPreset: (aspectId: CropAspectId) => void;
+  finishCrop: () => void;
+  resetCrop: () => void;
   exportPng: () => Promise<void>;
 }
 
 const EditorContext = createContext<EditorCommands | null>(null);
 
-FabricObject.customProperties = ["objectId", "assetId", "role"];
+FabricObject.customProperties = ["objectId", "assetId", "role", "cropAspect"];
+
+const CROP_ASPECTS: Record<Exclude<CropAspectId, "free">, number> = {
+  "16:9": 16 / 9,
+  "4:3": 4 / 3,
+  "1:1": 1,
+  "3:4": 3 / 4,
+  "9:16": 9 / 16,
+};
 
 function createObjectId() {
   return `object_${crypto.randomUUID()}`;
 }
 
 function readObjectSnapshot(object: EditorFabricObject): CanvasObjectSnapshot {
+  const image = object instanceof FabricImage ? object : null;
   return {
     id: object.objectId ?? "",
     assetId: object.assetId,
     role: object.role,
+    cropAspect: object.cropAspect,
+    isCropped: image?.hasCrop() ?? false,
     x: Math.round(object.left),
     y: Math.round(object.top),
     width: Math.round(object.getScaledWidth()),
@@ -66,6 +107,7 @@ function readObjectSnapshot(object: EditorFabricObject): CanvasObjectSnapshot {
 export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) {
   const canvasRef = useRef<FabricCanvas | null>(null);
   const boundCanvasRef = useRef<FabricCanvas | null>(null);
+  const cropDragRef = useRef<CropDragState | null>(null);
   const notice = useEditorStore((state) => state.notice);
   const setNotice = useEditorStore((state) => state.setNotice);
 
@@ -82,6 +124,127 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         }) ?? false,
     });
   }, []);
+
+  const finishCrop = useCallback(() => {
+    const canvas = canvasRef.current;
+    const cropDrag = cropDragRef.current;
+    const cropObject = canvas
+      ?.getObjects()
+      .find(
+        (object) =>
+          (object as EditorFabricObject).objectId === cropDrag?.objectId,
+      );
+
+    if (cropObject) {
+      cropObject.set({
+        hasControls: true,
+        lockScalingX: false,
+        lockScalingY: false,
+        lockRotation: false,
+        borderColor: "#62b1ff",
+        hoverCursor: "move",
+      });
+      cropObject.setCoords();
+    }
+
+    cropDragRef.current = null;
+    useEditorStore.getState().setCropSession(null);
+    useEditorStore.getState().setSnapGuides({
+      vertical: [],
+      horizontal: [],
+    });
+    canvas?.requestRenderAll();
+    syncCanvasState();
+  }, [syncCanvasState]);
+
+  const handleSelectionChange = useCallback(() => {
+    const canvas = canvasRef.current;
+    const activeObject = canvas?.getActiveObject() as EditorFabricObject | undefined;
+    const cropDrag = cropDragRef.current;
+    if (cropDrag && activeObject?.objectId !== cropDrag.objectId) {
+      finishCrop();
+      return;
+    }
+    useEditorStore.getState().setSnapGuides({
+      vertical: [],
+      horizontal: [],
+    });
+    syncCanvasState();
+  }, [finishCrop, syncCanvasState]);
+
+  const handleObjectMoving = useCallback(
+    (event: ObjectMovingEvent) => {
+      const canvas = canvasRef.current;
+      const target = event.target as EditorFabricObject;
+      if (!canvas) {
+        return;
+      }
+
+      const cropDrag = cropDragRef.current;
+      if (
+        cropDrag &&
+        cropDrag.objectId === target.objectId &&
+        target instanceof FabricImage
+      ) {
+        const dragOrigin = event.transform?.original;
+        const fixedLeft = dragOrigin?.left ?? cropDrag.left;
+        const fixedTop = dragOrigin?.top ?? cropDrag.top;
+        const initialCropX = dragOrigin?.cropX ?? target.cropX;
+        const initialCropY = dragOrigin?.cropY ?? target.cropY;
+        const deltaX = target.left - fixedLeft;
+        const deltaY = target.top - fixedTop;
+        const original = target.getOriginalSize();
+        const crop = calculateCropPan({
+          initialCropX,
+          initialCropY,
+          deltaX,
+          deltaY,
+          angle: target.angle,
+          scaleX: target.scaleX,
+          scaleY: target.scaleY,
+          original,
+          frame: target,
+        });
+
+        target.set({
+          left: fixedLeft,
+          top: fixedTop,
+          cropX: crop.cropX,
+          cropY: crop.cropY,
+          dirty: true,
+        });
+        target.setCoords();
+        useEditorStore.getState().setSnapGuides({
+          vertical: [],
+          horizontal: [],
+        });
+      } else {
+        const { canvasSize } = useEditorStore.getState();
+        useEditorStore
+          .getState()
+          .setSnapGuides(
+            snapObjectToGeometry(
+              canvas,
+              target,
+              canvasSize.width,
+              canvasSize.height,
+            ),
+          );
+      }
+
+      canvas.requestRenderAll();
+      syncCanvasState();
+    },
+    [syncCanvasState],
+  );
+
+  const handleObjectModified = useCallback(() => {
+    useEditorStore.getState().setSnapGuides({
+      vertical: [],
+      horizontal: [],
+    });
+    syncCanvasState();
+  }, [syncCanvasState]);
 
   const fitBackdropToCanvas = useCallback((backdrop: FabricImage) => {
     const { canvasSize } = useEditorStore.getState();
@@ -104,11 +267,11 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
   const registerCanvas = useCallback(
     (canvas: FabricCanvas | null) => {
       if (boundCanvasRef.current) {
-        boundCanvasRef.current.off("selection:created", syncCanvasState);
-        boundCanvasRef.current.off("selection:updated", syncCanvasState);
-        boundCanvasRef.current.off("selection:cleared", syncCanvasState);
-        boundCanvasRef.current.off("object:modified", syncCanvasState);
-        boundCanvasRef.current.off("object:moving", syncCanvasState);
+        boundCanvasRef.current.off("selection:created", handleSelectionChange);
+        boundCanvasRef.current.off("selection:updated", handleSelectionChange);
+        boundCanvasRef.current.off("selection:cleared", handleSelectionChange);
+        boundCanvasRef.current.off("object:modified", handleObjectModified);
+        boundCanvasRef.current.off("object:moving", handleObjectMoving);
         boundCanvasRef.current.off("object:scaling", syncCanvasState);
         boundCanvasRef.current.off("object:rotating", syncCanvasState);
       }
@@ -117,18 +280,23 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       boundCanvasRef.current = canvas;
 
       if (canvas) {
-        canvas.on("selection:created", syncCanvasState);
-        canvas.on("selection:updated", syncCanvasState);
-        canvas.on("selection:cleared", syncCanvasState);
-        canvas.on("object:modified", syncCanvasState);
-        canvas.on("object:moving", syncCanvasState);
+        canvas.on("selection:created", handleSelectionChange);
+        canvas.on("selection:updated", handleSelectionChange);
+        canvas.on("selection:cleared", handleSelectionChange);
+        canvas.on("object:modified", handleObjectModified);
+        canvas.on("object:moving", handleObjectMoving);
         canvas.on("object:scaling", syncCanvasState);
         canvas.on("object:rotating", syncCanvasState);
       }
 
       syncCanvasState();
     },
-    [syncCanvasState],
+    [
+      handleObjectModified,
+      handleObjectMoving,
+      handleSelectionChange,
+      syncCanvasState,
+    ],
   );
 
   const addImage = useCallback(async (asset: ImageAsset) => {
@@ -176,11 +344,20 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     (assetId: string) => {
       const canvas = canvasRef.current;
       const asset = useEditorStore.getState().assets.find((item) => item.id === assetId);
+      const cropObjectId = cropDragRef.current?.objectId;
 
       if (canvas) {
         const matchingObjects = canvas
           .getObjects()
           .filter((object) => (object as EditorFabricObject).assetId === assetId);
+        if (
+          cropObjectId &&
+          matchingObjects.some(
+            (object) => (object as EditorFabricObject).objectId === cropObjectId,
+          )
+        ) {
+          finishCrop();
+        }
         canvas.remove(...matchingObjects);
         canvas.discardActiveObject();
         canvas.requestRenderAll();
@@ -192,7 +369,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       useEditorStore.getState().removeAsset(assetId);
       syncCanvasState();
     },
-    [syncCanvasState],
+    [finishCrop, syncCanvasState],
   );
 
   const deleteSelection = useCallback(() => {
@@ -206,11 +383,20 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       return;
     }
 
+    if (
+      cropDragRef.current &&
+      activeObjects.some(
+        (object) =>
+          (object as EditorFabricObject).objectId === cropDragRef.current?.objectId,
+      )
+    ) {
+      finishCrop();
+    }
     canvas.discardActiveObject();
     canvas.remove(...activeObjects);
     canvas.requestRenderAll();
     syncCanvasState();
-  }, [syncCanvasState]);
+  }, [finishCrop, syncCanvasState]);
 
   const duplicateSelection = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -222,6 +408,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     const clone = (await activeObject.clone([
       "assetId",
       "role",
+      "cropAspect",
     ])) as EditorFabricObject;
     clone.set({
       left: activeObject.left + 36,
@@ -260,6 +447,37 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       const canvas = canvasRef.current;
       const activeObject = canvas?.getActiveObject();
       if (!canvas || !activeObject) {
+        return;
+      }
+
+      if (
+        cropDragRef.current &&
+        (activeObject as EditorFabricObject).objectId ===
+          cropDragRef.current.objectId &&
+        activeObject instanceof FabricImage
+      ) {
+        const original = activeObject.getOriginalSize();
+        activeObject.set({
+          cropX: Math.min(
+            Math.max(
+              activeObject.cropX +
+                x / Math.max(Math.abs(activeObject.scaleX), 0.001),
+              0,
+            ),
+            Math.max(original.width - activeObject.width, 0),
+          ),
+          cropY: Math.min(
+            Math.max(
+              activeObject.cropY +
+                y / Math.max(Math.abs(activeObject.scaleY), 0.001),
+              0,
+            ),
+            Math.max(original.height - activeObject.height, 0),
+          ),
+          dirty: true,
+        });
+        canvas.requestRenderAll();
+        syncCanvasState();
         return;
       }
 
@@ -353,6 +571,102 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     useEditorStore.getState().setNotice("Soft blurred backdrop created");
   }, [fitBackdropToCanvas, syncCanvasState]);
 
+  const applyCropPreset = useCallback(
+    (aspectId: CropAspectId) => {
+      const canvas = canvasRef.current;
+      const activeObject = canvas?.getActiveObject();
+      if (!canvas || !(activeObject instanceof FabricImage)) {
+        useEditorStore.getState().setNotice("Select an image before cropping");
+        return;
+      }
+
+      const image = activeObject as FabricImage & EditorFabricObject;
+      if (image.role === "background" || !image.objectId) {
+        return;
+      }
+
+      if (aspectId === "free") {
+        finishCrop();
+        return;
+      }
+
+      const original = image.getOriginalSize();
+      const aspect = CROP_ASPECTS[aspectId];
+      const crop = calculateCropFrame(
+        original,
+        aspect,
+        {
+          width: image.getScaledWidth(),
+          height: image.getScaledHeight(),
+        },
+      );
+
+      image.cropAspect = aspectId;
+      image.set({
+        width: crop.width,
+        height: crop.height,
+        cropX: crop.cropX,
+        cropY: crop.cropY,
+        scaleX: crop.scale,
+        scaleY: crop.scale,
+        hasControls: false,
+        lockScalingX: true,
+        lockScalingY: true,
+        lockRotation: true,
+        borderColor: "#ff9d47",
+        hoverCursor: "grab",
+        dirty: true,
+      });
+      image.setCoords();
+      cropDragRef.current = {
+        objectId: image.objectId,
+        left: image.left,
+        top: image.top,
+      };
+      useEditorStore.getState().setCropSession({
+        objectId: image.objectId,
+        aspectId,
+      });
+      useEditorStore.getState().setNotice("Drag the photo to adjust the crop");
+      canvas.requestRenderAll();
+      syncCanvasState();
+    },
+    [finishCrop, syncCanvasState],
+  );
+
+  const resetCrop = useCallback(() => {
+    const canvas = canvasRef.current;
+    const activeObject = canvas?.getActiveObject();
+    if (!canvas || !(activeObject instanceof FabricImage)) {
+      return;
+    }
+
+    const image = activeObject as FabricImage & EditorFabricObject;
+    const original = image.getOriginalSize();
+    const currentDisplayWidth = image.getScaledWidth();
+    const currentDisplayHeight = image.getScaledHeight();
+    const scale = Math.sqrt(
+      (currentDisplayWidth * currentDisplayHeight) /
+        Math.max(original.width * original.height, 1),
+    );
+
+    finishCrop();
+    image.cropAspect = undefined;
+    image.set({
+      width: original.width,
+      height: original.height,
+      cropX: 0,
+      cropY: 0,
+      scaleX: scale,
+      scaleY: scale,
+      dirty: true,
+    });
+    image.setCoords();
+    canvas.requestRenderAll();
+    syncCanvasState();
+    useEditorStore.getState().setNotice("Crop reset");
+  }, [finishCrop, syncCanvasState]);
+
   const exportPng = useCallback(async () => {
     const canvas = canvasRef.current;
     const state = useEditorStore.getState();
@@ -432,7 +746,11 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       }
 
       if (event.key === "Escape") {
-        clearSelection();
+        if (cropDragRef.current) {
+          finishCrop();
+        } else {
+          clearSelection();
+        }
         return;
       }
 
@@ -479,6 +797,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     clearSelection,
     deleteSelection,
     duplicateSelection,
+    finishCrop,
     moveSelectionBackward,
     moveSelectionForward,
     nudgeSelection,
@@ -515,19 +834,25 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       clearSelection,
       createBlurredBackdrop,
       removeBackdrop,
+      applyCropPreset,
+      finishCrop,
+      resetCrop,
       exportPng,
     }),
     [
       addImage,
+      applyCropPreset,
       deleteSelection,
       duplicateSelection,
       exportPng,
+      finishCrop,
       clearSelection,
       createBlurredBackdrop,
       moveSelectionBackward,
       moveSelectionForward,
       nudgeSelection,
       registerCanvas,
+      resetCrop,
       removeBackdrop,
       removeAsset,
     ],

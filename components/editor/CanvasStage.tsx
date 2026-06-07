@@ -17,6 +17,8 @@ export function CanvasStage() {
   const isCanvasReady = useEditorStore((state) => state.isCanvasReady);
   const setCanvasReady = useEditorStore((state) => state.setCanvasReady);
   const setPreviewScale = useEditorStore((state) => state.setPreviewScale);
+  const snapGuides = useEditorStore((state) => state.snapGuides);
+  const cropSession = useEditorStore((state) => state.cropSession);
 
   useEffect(() => {
     const canvasElement = canvasElementRef.current;
@@ -69,7 +71,28 @@ export function CanvasStage() {
     <div className="canvas-stage" ref={viewportRef}>
       <div className="canvas-viewport" aria-label="Wallpaper canvas">
         <canvas ref={canvasElementRef} />
+        <div className="snap-guide-layer" aria-hidden="true">
+          {snapGuides.vertical.map((position) => (
+            <i
+              className="snap-guide vertical"
+              key={`vertical-${position}`}
+              style={{ left: `${(position / canvasSize.width) * 100}%` }}
+            />
+          ))}
+          {snapGuides.horizontal.map((position) => (
+            <i
+              className="snap-guide horizontal"
+              key={`horizontal-${position}`}
+              style={{ top: `${(position / canvasSize.height) * 100}%` }}
+            />
+          ))}
+        </div>
       </div>
+      {cropSession ? (
+        <div className="crop-mode-badge" role="status">
+          Crop mode · drag photo to reframe · Esc to finish
+        </div>
+      ) : null}
       <div className="canvas-meta" aria-live="polite">
         <span>
           <i className={`status-dot ${isCanvasReady ? "ready" : ""}`} />

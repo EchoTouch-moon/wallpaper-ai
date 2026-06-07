@@ -13,10 +13,27 @@ export type ImageTransitionType =
   | "shared-color-wash"
   | "clean-gap";
 
+export type BoundaryTreatmentType =
+  | "edge-to-edge"
+  | "clean-gap"
+  | "hairline"
+  | "soft-shadow"
+  | "overlap"
+  | "feather"
+  | "paper-edge";
+
 export interface ImageTransition {
   type: ImageTransitionType;
   strength: number;
   feather: number;
+  color?: string;
+}
+
+export interface BoundaryTreatment {
+  type: BoundaryTreatmentType;
+  gap: number;
+  radius: number;
+  width: number;
   color?: string;
 }
 
@@ -25,6 +42,7 @@ export interface LayoutGuidance {
   focalAssetId?: string;
   visualFlow: "left-to-right" | "right-to-left" | "top-to-bottom" | "center-out";
   transition: ImageTransition;
+  boundary: BoundaryTreatment;
   preserveFaces: boolean;
   preserveNegativeSpace: boolean;
 }

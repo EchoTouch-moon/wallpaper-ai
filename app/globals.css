@@ -786,7 +786,8 @@ input:focus-visible {
   margin-top: 13px;
 }
 
-.transition-actions button {
+.transition-actions button,
+.crop-actions button {
   min-height: 32px;
   flex: 1;
   border: 1px solid rgba(40, 143, 164, 0.22);
@@ -799,13 +800,15 @@ input:focus-visible {
   cursor: pointer;
 }
 
-.transition-actions button.secondary {
+.transition-actions button.secondary,
+.crop-actions button.secondary {
   flex: 0 0 auto;
   color: var(--editor-muted);
   background: rgba(255, 255, 255, 0.68);
 }
 
-.transition-actions button:disabled {
+.transition-actions button:disabled,
+.crop-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
@@ -815,6 +818,16 @@ input:focus-visible {
   color: var(--editor-muted);
   font-size: 8px;
   line-height: 1.5;
+}
+
+.crop-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.crop-actions button {
+  flex: 1;
 }
 
 .export-message {
@@ -891,6 +904,51 @@ input:focus-visible {
 
 .canvas-viewport canvas {
   display: block;
+}
+
+.snap-guide-layer {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.snap-guide {
+  position: absolute;
+  display: block;
+  background: #ff8a38;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.78);
+}
+
+.snap-guide.vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.snap-guide.horizontal {
+  right: 0;
+  left: 0;
+  height: 1px;
+}
+
+.crop-mode-badge {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 5;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #6f3a12;
+  background: rgba(255, 226, 196, 0.9);
+  box-shadow: 0 8px 24px rgba(123, 75, 32, 0.12);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  font-size: 9px;
+  font-weight: 650;
 }
 
 .canvas-meta {

@@ -37,6 +37,44 @@ strategy, then return editable geometry rather than a flattened image.
 - Align images by subject eye line, horizon, or a shared edge rather than by
   their raw bounding boxes.
 
+## Boundary hierarchy
+
+Geometry is resolved before visual transitions. The editor should first make
+the image rectangles intentional, then decide whether the meeting edge should
+remain visible or be softened.
+
+1. **Edge alignment**: snap image left, center, and right anchors to the canvas
+   and to other image anchors. Do the same for top, middle, and bottom anchors.
+2. **Crop and focal framing**: choose the image window before arranging the
+   composition. Keep the crop window fixed while the source image moves behind
+   it, so a face, horizon, or subject remains under direct control.
+3. **Spacing rhythm**: use one repeated gap value within a composition. A clean
+   gap is a structural choice, not a failed blend.
+4. **Layer order and overlap**: use overlap only when one image is clearly the
+   hero. Avoid ambiguous tangencies where edges almost meet.
+5. **Edge treatment**: add a hairline, shared radius, soft shadow, feather, or
+   paper edge only after the geometry reads clearly without decoration.
+
+The current editor implements canvas/object anchor snapping, temporary
+non-exported guides, ratio crops, and draggable focal reframing. Equal-gap
+distribution and subject-aware anchors remain future geometry tools.
+
+## Editorial versus scrapbook modes
+
+Scrapbook language is useful as an optional rendering vocabulary, not as the
+product's information architecture. Tape, torn paper, pins, handwriting, and
+paper texture can make memory-based compositions feel personal, but they should
+be presets applied to image boundaries after layout.
+
+The product remains differentiated from a notes app by keeping wallpaper
+resolution, safe areas, pixel-accurate export, focal crops, multi-image layout,
+and device-specific composition at the center. A future style system can offer:
+
+- **Editorial**: clean gap, hairline, consistent radius, restrained shadow.
+- **Cinematic**: edge-to-edge crops, feathered meeting edges, color continuity.
+- **Memory board**: overlap, paper edge, tape accents, slight rotation.
+- **Minimal grid**: equal gaps, strict alignment, no decorative transition.
+
 ## Transition hierarchy
 
 1. **Blurred extension**: best when a single hero does not cover the canvas.
@@ -64,6 +102,8 @@ The output should include editable item geometry plus:
 
 - focal asset;
 - visual flow;
+- normalized crop rectangle and focal point for every image;
+- boundary type, gap, corner radius, line width, and optional color;
 - transition type, strength, and feather width;
 - whether faces and negative space must be preserved.
 
