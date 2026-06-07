@@ -18,6 +18,14 @@ Tailwind CSS, Fabric.js, and Zustand.
 - Keyboard editing shortcuts
 - Composition intents and transition guidance for future AI layouts
 - Editable blurred backdrop generation for mixed-ratio compositions
+- Canonical Zod layout and project schemas
+- Local image color analysis and deterministic color grouping
+- Desktop and mobile triptych layout candidates
+- Fabric layout apply/serialize round trips
+- 50-step layout undo and redo
+- IndexedDB asset and draft persistence
+- Desktop and mobile wallpaper safe-area overlays
+- Stateful snapping with per-axis locking and release hysteresis
 
 ## Keyboard shortcuts
 
@@ -33,9 +41,11 @@ Tailwind CSS, Fabric.js, and Zustand.
 
 See [wallpaper composition strategy](docs/wallpaper-composition.md) for the
 ratio and image-transition rules intended for the future AI layout service.
+The latest delivery status is recorded in the
+[project progress report](docs/project-progress-report-2026-06-07.md).
 
-AI generation, persistence, history, and wallpaper safe-area tools are
-intentionally deferred.
+AI generation, face/subject detection, irregular templates, moodboards, and a
+multi-project workspace are intentionally deferred.
 
 ## Development
 
