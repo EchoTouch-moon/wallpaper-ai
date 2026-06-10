@@ -126,10 +126,6 @@ export function CanvasStage() {
         <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 border border-gray-200 rounded-full px-4 py-2 bg-white text-black shadow-sm font-medium text-[11px]" role="status">
           裁剪模式 · 拖拽图片以重新定位 · 按 Esc 键完成
         </div>
-      ) : !cropSession && currentLayout ? (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 border border-blue-200 rounded-full px-4 py-2 bg-blue-50 text-blue-700 shadow-sm font-medium text-[11px]" role="status">
-          排版模式 · 拖动照片可交换位置
-        </div>
       ) : null}
 
       <div className="absolute bottom-4 left-4 flex gap-3 text-gray-400 text-[10px] z-0" aria-label="快捷键">

@@ -46,6 +46,7 @@ export function Toolbar() {
   const toggleSafeAreas = useEditorStore((state) => state.toggleSafeAreas);
   const enableSnapping = useEditorStore((state) => state.enableSnapping);
   const toggleSnapping = useEditorStore((state) => state.toggleSnapping);
+  const currentLayout = useEditorStore((state) => state.currentLayout);
   const {
     deleteSelection,
     duplicateSelection,
@@ -65,6 +66,13 @@ export function Toolbar() {
           <div className="w-2.5 h-2.5 bg-white rounded-sm" />
         </div>
         <span className="font-semibold text-sm tracking-tight text-gray-900">AI 壁纸工作室</span>
+
+        {currentLayout && (
+          <span className="ml-2 px-2.5 py-1 text-[10px] font-medium text-blue-600 bg-blue-50/80 border border-blue-100/60 rounded-full flex items-center gap-1.5 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+            排版模式：拖动照片可交换位置
+          </span>
+        )}
       </div>
 
       {/* Middle side: Main Canvas / Edit Operations */}
