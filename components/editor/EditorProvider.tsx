@@ -508,7 +508,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
             const idA = target.objectId;
             const idB = hitTarget.objectId;
 
-            const newLayout = swapLayoutItemAssets(currentLayout, idA, idB);
+            const { assets } = useEditorStore.getState();
+            const newLayout = swapLayoutItemAssets(currentLayout, idA, idB, assets);
 
             swapDragStateRef.current = null;
             const draggedAssetId = target.assetId;
