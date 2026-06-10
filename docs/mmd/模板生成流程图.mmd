@@ -1,0 +1,64 @@
+flowchart TD
+  A[用户上传图片] --> B[ImageAsset 图片资产]
+  B --> C[ImageAnalysis 图片分析]
+
+  C --> C1[主色调]
+  C --> C2[横竖方向]
+  C --> C3[亮度 / 饱和度]
+  C --> C4[分辨率评分]
+  C --> C5[主体 / 人脸信息<br/>后续增强]
+
+  C --> D[图片分组与筛选]
+
+  D --> D1[同色系分组]
+  D --> D2[横图 / 竖图分类]
+  D --> D3[高质量图片优先]
+  D --> D4[人像图片优先<br/>后续增强]
+
+  D --> E[选择模板 Template]
+
+  E --> E1[同色系三拼]
+  E --> E2[叠层拼贴]
+  E --> E3[人像三拼]
+  E --> E4[不规则拼图]
+
+  E --> F[读取 TemplateSlot 槽位]
+
+  F --> F1[slot 位置]
+  F --> F2[slot 尺寸]
+  F --> F3[slot 角色<br/>hero / support / background]
+  F --> F4[推荐图片方向]
+  F --> F5[重要区域 importanceArea]
+
+  F --> G[图片匹配到槽位]
+
+  G --> G1[主图匹配 hero slot]
+  G --> G2[辅助图匹配 support slot]
+  G --> G3[横图匹配横向槽位]
+  G --> G4[竖图匹配竖向槽位]
+  G --> G5[低清图避免放大]
+
+  G --> H[生成 LayoutItem]
+
+  H --> H1[计算 x / y]
+  H --> H2[计算 w / h]
+  H --> H3[计算 rotation]
+  H --> H4[计算 zIndex]
+  H --> H5[计算 crop]
+  H --> H6[计算 style]
+
+  H --> I[组装 CanvasLayout]
+
+  I --> I1[canvas 配置]
+  I --> I2[background 配置]
+  I --> I3[items 列表]
+  I --> I4[safeAreas]
+  I --> I5[globalStyle]
+
+  I --> J[validateLayout 校验]
+
+  J -->|合法| K[applyLayoutToFabric]
+  K --> L[Fabric.js 画布渲染]
+
+  J -->|非法| M[修正 Layout]
+  M --> J

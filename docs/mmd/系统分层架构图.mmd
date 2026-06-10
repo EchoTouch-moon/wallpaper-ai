@@ -1,0 +1,64 @@
+---
+id: 78cbe177-2764-4132-a851-c8d246bd831f
+---
+flowchart TB
+  subgraph UI[用户界面层]
+    UI1[Toolbar 顶部工具栏]
+    UI2[AssetPanel 素材栏]
+    UI3[CanvasStage 画布区域]
+    UI4[PropertyPanel 属性面板]
+    UI5[LayoutPreviewBar 方案预览]
+  end
+
+  subgraph Editor[画布编辑层]
+    E1[Fabric Canvas 初始化]
+    E2[图片对象编辑]
+    E3[图层管理]
+    E4[导出渲染]
+  end
+
+  subgraph Asset[图片资产层]
+    A1[图片上传]
+    A2[assetId 生成]
+    A3[宽高读取]
+    A4[objectURL 管理]
+  end
+
+  subgraph Analysis[图片分析层]
+    AN1[主色提取]
+    AN2[亮度 / 饱和度]
+    AN3[横竖方向]
+    AN4[分辨率评分]
+  end
+
+  subgraph Template[模板系统层]
+    T1[同色系三拼]
+    T2[叠层拼贴]
+    T3[人像三拼]
+    T4[不规则拼图]
+  end
+
+  subgraph Layout[Layout JSON 协议层]
+    L1[Layout 类型定义]
+    L2[validateLayout]
+    L3[applyLayoutToFabric]
+    L4[serializeFabricToLayout]
+  end
+
+  subgraph AI[AI 通信层]
+    AI1[构造 Prompt]
+    AI2[生成 3 个布局方案]
+    AI3[解析 AI 返回]
+    AI4[修复非法 JSON]
+  end
+
+  UI --> Asset
+  UI --> Editor
+  Asset --> Analysis
+  Analysis --> Template
+  Analysis --> AI
+  Template --> Layout
+  AI --> Layout
+  Layout --> Editor
+  Editor --> Layout
+  Editor --> UI

@@ -1,0 +1,15 @@
+---
+id: c8910ee7-0480-4c42-ac5d-8989d16993ad
+---
+flowchart TD
+  A[用户上传图片] --> B[ImageAsset 图片资产]
+  B --> C[ImageAnalysis 图片分析]
+  C --> D[模板选择 / Mock AI]
+  D --> E[Layout JSON]
+  E --> F[validateLayout 校验]
+  F --> G[applyLayoutToFabric]
+  G --> H[Fabric.js 画布]
+  H --> I[用户手动微调]
+  I --> J[serializeFabricToLayout]
+  J --> E
+  H --> K[导出 PNG / WebP]

@@ -1,0 +1,59 @@
+flowchart TD
+  A[你：项目负责人] --> B[定义任务 Task Card]
+
+  B --> B1[任务目标]
+  B --> B2[允许修改文件]
+  B --> B3[禁止修改文件]
+  B --> B4[验收标准]
+  B --> B5[指定负责人]
+  B --> B6[指定分支]
+
+  B --> C{任务类型判断}
+
+  C -->|前端 UI / Fabric 基础交互| G[Google CLI]
+  C -->|Layout JSON / 模板 / 图片分析 / AI Prompt| CL[Claude Code]
+  C -->|全仓库审查 / 重构 / 测试 / 文档| CX[Codex]
+
+  G --> G1[feature/google-xxx 分支]
+  CL --> CL1[feature/claude-xxx 分支]
+  CX --> CX1[feature/codex-xxx 分支]
+
+  G1 --> D[实现任务]
+  CL1 --> D
+  CX1 --> D
+
+  D --> E[运行检查]
+  E --> E1[npm run typecheck]
+  E --> E2[npm run lint]
+  E --> E3[npm run build]
+  E --> E4[手动功能验证]
+
+  E --> F{检查是否通过}
+
+  F -->|否| R[返回对应 Agent 修复]
+  R --> D
+
+  F -->|是| H[提交 feature 分支]
+  H --> I[你审查 Diff]
+
+  I --> J{是否接受}
+
+  J -->|否| K[提出修改意见]
+  K --> R
+
+  J -->|是| L[合并到 dev 分支]
+
+  L --> M[dev 分支集成验证]
+  M --> M1[typecheck]
+  M --> M2[lint]
+  M --> M3[build]
+  M --> M4[核心功能测试]
+
+  M --> N{阶段是否稳定}
+
+  N -->|否| O[继续下一个 Task]
+  O --> B
+
+  N -->|是| P[合并到 main 分支]
+  P --> Q[更新文档 / README / 架构图]
+  Q --> B

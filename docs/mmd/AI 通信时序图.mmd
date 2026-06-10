@@ -1,0 +1,45 @@
+---
+id: d9ea8f21-e656-4bfc-b4c2-a1edaaa7472c
+---
+sequenceDiagram
+  actor User as 用户
+  participant UI as 前端 UI
+  participant Store as Zustand 状态层
+  participant API as generate-layout API
+  participant AI as AI 模型服务
+  participant Validator as Layout 校验器
+  participant Fabric as Fabric.js 画布
+
+  User->>UI: 点击“生成布局”
+  UI->>Store: 读取 canvas / assets / userIntent
+  Store-->>UI: 返回当前项目状态
+
+  UI->>API: POST /api/generate-layout
+  Note right of UI: 请求包含：<br/>canvas 设置<br/>assets 分析结果<br/>用户选择的风格<br/>可用模板
+
+  API->>AI: 发送布局生成 Prompt
+  Note right of AI: AI 只生成 Layout JSON<br/>不操作 DOM<br/>不模拟鼠标拖拽
+
+  AI-->>API: 返回 3 个 Layout JSON 方案
+
+  API->>Validator: validateLayout(layouts)
+  Validator-->>API: 返回合法布局 / 错误信息
+
+  alt 布局合法
+    API-->>UI: 返回 3 个可用布局方案
+    UI->>Store: 保存 layouts 到 layoutCandidates
+    UI->>Fabric: 渲染方案预览
+    User->>UI: 选择其中一个方案
+    UI->>Fabric: applyLayoutToFabric(selectedLayout)
+    Fabric-->>UI: 画布更新完成
+  else 布局非法
+    API->>AI: 请求修复非法 JSON
+    AI-->>API: 返回修复后的 Layout JSON
+    API->>Validator: 再次校验
+    Validator-->>API: 返回校验结果
+    API-->>UI: 返回修复结果或 fallback mock layout
+  end
+
+  User->>Fabric: 手动微调布局
+  Fabric->>Store: serializeFabricToLayout()
+  Store-->>UI: 更新当前 Layout JSON

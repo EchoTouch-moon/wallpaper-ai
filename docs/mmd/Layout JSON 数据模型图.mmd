@@ -1,0 +1,134 @@
+---
+id: ad35db37-7678-419a-90aa-1a7c1b14f45f
+---
+classDiagram
+  class ImageAsset {
+    string id
+    string fileName
+    string objectUrl
+    number width
+    number height
+    string orientation
+    number fileSize
+    ImageAnalysis analysis
+  }
+
+  class ImageAnalysis {
+    number width
+    number height
+    string orientation
+    string[] dominantColors
+    number averageBrightness
+    number averageSaturation
+    number resolutionScore
+    string contentType
+    Box[] faces
+    Box subjectBox
+    string[] styleTags
+  }
+
+  class Box {
+    number x
+    number y
+    number w
+    number h
+  }
+
+  class CanvasLayout {
+    string version
+    CanvasConfig canvas
+    LayoutItem[] items
+    SafeArea[] safeAreas
+    GlobalStyle globalStyle
+    string templateId
+  }
+
+  class CanvasConfig {
+    number width
+    number height
+    string ratio
+    Background background
+  }
+
+  class Background {
+    string type
+    string color
+    string sourceAssetId
+    number blur
+    number brightness
+  }
+
+  class LayoutItem {
+    string id
+    string assetId
+    number x
+    number y
+    number w
+    number h
+    number rotation
+    number zIndex
+    Crop crop
+    ItemStyle style
+  }
+
+  class Crop {
+    number scale
+    number offsetX
+    number offsetY
+  }
+
+  class ItemStyle {
+    number radius
+    string shadow
+    number opacity
+    string blendMode
+  }
+
+  class SafeArea {
+    string type
+    number x
+    number y
+    number w
+    number h
+  }
+
+  class GlobalStyle {
+    string tone
+    number grain
+    number vignette
+    number brightness
+    number saturation
+  }
+
+  class Template {
+    string id
+    string name
+    string type
+    TemplateSlot[] slots
+  }
+
+  class TemplateSlot {
+    string id
+    number x
+    number y
+    number w
+    number h
+    number rotation
+    string role
+    string preferredOrientation
+    Box importanceArea
+  }
+
+  ImageAsset --> ImageAnalysis
+  ImageAnalysis --> Box
+  CanvasLayout --> CanvasConfig
+  CanvasLayout --> LayoutItem
+  CanvasLayout --> SafeArea
+  CanvasLayout --> GlobalStyle
+  CanvasConfig --> Background
+  LayoutItem --> Crop
+  LayoutItem --> ItemStyle
+  LayoutItem --> ImageAsset : assetId references
+  Template --> TemplateSlot
+  TemplateSlot --> Box
+  Template --> CanvasLayout : generates
