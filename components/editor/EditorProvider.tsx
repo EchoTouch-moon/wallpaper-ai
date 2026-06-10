@@ -60,6 +60,12 @@ interface CropDragState {
   top: number;
 }
 
+interface SwapDragState {
+  objectId: string;
+  left: number;
+  top: number;
+}
+
 interface ObjectMovingEvent {
   target: FabricObject;
   e?: {
@@ -142,10 +148,37 @@ function readObjectSnapshot(object: EditorFabricObject): CanvasObjectSnapshot {
   };
 }
 
+function findHitTarget(draggedObject: EditorFabricObject, canvas: FabricCanvas) {
+  const center = draggedObject.getCenterPoint();
+  const centerX = center.x;
+  const centerY = center.y;
+
+  const objects = canvas.getObjects();
+  for (const obj of objects) {
+    if (
+      obj instanceof FabricImage &&
+      obj !== draggedObject &&
+      (obj as LayoutFabricImage).role !== "background"
+    ) {
+      const bounds = obj.getBoundingRect();
+      if (
+        centerX >= bounds.left &&
+        centerX <= bounds.left + bounds.width &&
+        centerY >= bounds.top &&
+        centerY <= bounds.top + bounds.height
+      ) {
+        return obj as LayoutFabricImage;
+      }
+    }
+  }
+  return null;
+}
+
 export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) {
   const canvasRef = useRef<FabricCanvas | null>(null);
   const boundCanvasRef = useRef<FabricCanvas | null>(null);
   const cropDragRef = useRef<CropDragState | null>(null);
+  const swapDragStateRef = useRef<SwapDragState | null>(null);
   const isApplyingLayoutRef = useRef(false);
   const snapSessionRef = useRef(createSnapSession());
   const pendingRestoreRef = useRef<WallpaperLayout | null>(null);
@@ -189,6 +222,26 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       }
     },
     [syncCanvasState],
+  );
+
+  const applyLayout = useCallback(
+    async (layout: WallpaperLayout, addToHistory = true) => {
+      const rendered = await renderLayoutOnCanvas(layout).catch(() => false);
+      if (!rendered) {
+        if (!canvasRef.current) {
+          useEditorStore.getState().setNotice("Canvas is still loading");
+        } else {
+          useEditorStore.getState().setNotice("Could not apply this layout");
+        }
+        return;
+      }
+
+      useEditorStore.getState().commitLayout(layout, addToHistory);
+      useEditorStore
+        .getState()
+        .setNotice(`${layout.template?.id ?? "Layout"} applied`);
+    },
+    [renderLayoutOnCanvas],
   );
 
   const commitCurrentCanvasLayout = useCallback(() => {
@@ -296,7 +349,22 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         });
         resetSnapSession(snapSessionRef.current);
       } else {
-        const { canvasSize, enableSnapping } = useEditorStore.getState();
+        const { currentLayout, canvasSize, enableSnapping } = useEditorStore.getState();
+        const isSwapDrag = !!currentLayout && target instanceof FabricImage && (target as EditorFabricObject).role !== "background";
+
+        if (isSwapDrag) {
+          const targetObjectId = (target as EditorFabricObject).objectId;
+          if (!swapDragStateRef.current || swapDragStateRef.current.objectId !== targetObjectId) {
+            const originalLeft = event.transform?.original.left ?? target.left;
+            const originalTop = event.transform?.original.top ?? target.top;
+            swapDragStateRef.current = {
+              objectId: targetObjectId ?? "",
+              left: originalLeft,
+              top: originalTop,
+            };
+          }
+        }
+
         const hasBypassKey = event.e && (event.e.metaKey || event.e.ctrlKey);
 
         if (enableSnapping && !hasBypassKey) {
@@ -325,15 +393,86 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     [syncCanvasState],
   );
 
-  const handleObjectModified = useCallback(() => {
+  const handleObjectModified = useCallback(async () => {
     resetSnapSession(snapSessionRef.current);
     useEditorStore.getState().setSnapGuides({
       vertical: [],
       horizontal: [],
     });
+
+    const canvas = canvasRef.current;
+    const swapDrag = swapDragStateRef.current;
+
+    if (swapDrag && canvas) {
+      const target = canvas.getActiveObject() as EditorFabricObject | undefined;
+      if (target && target.objectId === swapDrag.objectId) {
+        const hitTarget = findHitTarget(target, canvas);
+        if (hitTarget && hitTarget.objectId) {
+          const { currentLayout } = useEditorStore.getState();
+          if (currentLayout) {
+            const idA = target.objectId;
+            const idB = hitTarget.objectId;
+
+            const newItems = currentLayout.items.map((item) => {
+              if (item.id === idA) {
+                const otherItem = currentLayout.items.find((it) => it.id === idB);
+                return {
+                  ...item,
+                  assetId: otherItem ? otherItem.assetId : item.assetId,
+                };
+              }
+              if (item.id === idB) {
+                const otherItem = currentLayout.items.find((it) => it.id === idA);
+                return {
+                  ...item,
+                  assetId: otherItem ? otherItem.assetId : item.assetId,
+                };
+              }
+              return item;
+            });
+
+            const newLayout = {
+              ...currentLayout,
+              items: newItems,
+            };
+
+            swapDragStateRef.current = null;
+            const activeId = target.objectId;
+
+            await applyLayout(newLayout, true);
+
+            if (activeId) {
+              const newActiveObject = canvas.getObjects().find(
+                (obj) => (obj as EditorFabricObject).objectId === activeId
+              );
+              if (newActiveObject) {
+                canvas.setActiveObject(newActiveObject);
+                canvas.requestRenderAll();
+                syncCanvasState();
+              }
+            }
+            return;
+          }
+        }
+
+        // Restore original position
+        target.set({
+          left: swapDrag.left,
+          top: swapDrag.top,
+          dirty: true,
+        });
+        target.setCoords();
+        canvas.requestRenderAll();
+      }
+
+      swapDragStateRef.current = null;
+      syncCanvasState();
+      return;
+    }
+
     syncCanvasState();
     commitCurrentCanvasLayout();
-  }, [commitCurrentCanvasLayout, syncCanvasState]);
+  }, [commitCurrentCanvasLayout, syncCanvasState, applyLayout]);
 
   const fitBackdropToCanvas = useCallback((backdrop: FabricImage) => {
     const { canvasSize } = useEditorStore.getState();
@@ -782,26 +921,6 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     useEditorStore.getState().setNotice("Crop reset");
     commitCurrentCanvasLayout();
   }, [commitCurrentCanvasLayout, finishCrop, syncCanvasState]);
-
-  const applyLayout = useCallback(
-    async (layout: WallpaperLayout, addToHistory = true) => {
-      const rendered = await renderLayoutOnCanvas(layout).catch(() => false);
-      if (!rendered) {
-        if (!canvasRef.current) {
-          useEditorStore.getState().setNotice("Canvas is still loading");
-        } else {
-          useEditorStore.getState().setNotice("Could not apply this layout");
-        }
-        return;
-      }
-
-      useEditorStore.getState().commitLayout(layout, addToHistory);
-      useEditorStore
-        .getState()
-        .setNotice(`${layout.template?.id ?? "Layout"} applied`);
-    },
-    [renderLayoutOnCanvas],
-  );
 
   const undo = useCallback(async () => {
     const layout = useEditorStore.getState().undoLayout();
