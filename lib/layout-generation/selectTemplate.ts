@@ -16,7 +16,27 @@ const STYLE_TO_TEMPLATE_TYPE: Record<
   "irregular-collage": "irregular-collage",
 };
 
-function preferredTypeForAssets(assets: ImageAssetAnalysis[]): TemplateType {
+function hasDesktopHeroSignal(request: GenerateLayoutRequest) {
+  const isDesktop =
+    request.canvas.ratioId === "16:9" ||
+    request.canvas.ratioId === "16:10" ||
+    request.canvas.ratioId === "21:9";
+
+  if (!isDesktop) {
+    return false;
+  }
+
+  return request.assets.some(
+    (asset) =>
+      asset.orientation === "landscape" &&
+      asset.resolutionScore >= 0.86 &&
+      (asset.bestUse?.includes("hero") ||
+        asset.bestUse?.includes("background") ||
+        asset.aspectRatio >= 1.65),
+  );
+}
+
+function hasPortraitSignals(assets: ImageAssetAnalysis[]) {
   const portraitSignals = assets.filter(
     (asset) =>
       asset.contentType === "portrait" ||
@@ -24,7 +44,22 @@ function preferredTypeForAssets(assets: ImageAssetAnalysis[]): TemplateType {
       asset.bestUse?.includes("portrait-collage"),
   ).length;
 
-  if (portraitSignals >= 2) {
+  return portraitSignals >= 2;
+}
+
+function hasStrongColorGroup(assets: ImageAssetAnalysis[]) {
+  const strongestColorGroup = groupAssetsByColor(assets)[0];
+  return Boolean(
+    strongestColorGroup &&
+      strongestColorGroup.assets.length >= 3 &&
+      strongestColorGroup.harmonyScore >= 0.82,
+  );
+}
+
+function preferredTypeForAssets(request: GenerateLayoutRequest): TemplateType {
+  const { assets } = request;
+
+  if (hasPortraitSignals(assets)) {
     return "portrait-triptych";
   }
 
@@ -32,13 +67,12 @@ function preferredTypeForAssets(assets: ImageAssetAnalysis[]): TemplateType {
     return "irregular-collage";
   }
 
-  const strongestColorGroup = groupAssetsByColor(assets)[0];
-  if (
-    strongestColorGroup &&
-    strongestColorGroup.assets.length >= 3 &&
-    strongestColorGroup.harmonyScore >= 0.82
-  ) {
+  if (hasStrongColorGroup(assets)) {
     return "triptych";
+  }
+
+  if (hasDesktopHeroSignal(request)) {
+    return "layered-moodboard";
   }
 
   return "layered-moodboard";
@@ -47,10 +81,27 @@ function preferredTypeForAssets(assets: ImageAssetAnalysis[]): TemplateType {
 export function selectTemplateTypes(request: GenerateLayoutRequest): TemplateType[] {
   const primary =
     request.intent.style === "auto"
-      ? preferredTypeForAssets(request.assets)
+      ? preferredTypeForAssets(request)
       : STYLE_TO_TEMPLATE_TYPE[request.intent.style];
+  const intentSecondary: TemplateType[] =
+    request.intent.compositionIntent === "single-hero" ||
+    request.intent.compositionIntent === "hero-with-support"
+      ? ["layered-moodboard", "triptych"]
+      : request.intent.compositionIntent === "story-strip"
+        ? ["triptych", "irregular-collage"]
+        : request.intent.compositionIntent === "balanced-collage"
+          ? ["triptych", "irregular-collage"]
+          : [];
+  const contentSecondary: TemplateType[] = [
+    hasDesktopHeroSignal(request) ? "layered-moodboard" : primary,
+    hasStrongColorGroup(request.assets) ? "triptych" : primary,
+    request.assets.length >= 5 ? "irregular-collage" : primary,
+    hasPortraitSignals(request.assets) ? "portrait-triptych" : primary,
+  ];
   const ordered: TemplateType[] = [
     primary,
+    ...intentSecondary,
+    ...contentSecondary,
     "triptych",
     "layered-moodboard",
     "irregular-collage",

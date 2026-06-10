@@ -24,7 +24,10 @@ export function generateFromTemplate(request: GenerateLayoutRequest) {
     templates,
     request.intent.compositionIntent,
   )
-    .sort((left, right) => scoreLayout(right).total - scoreLayout(left).total)
+    .sort(
+      (left, right) =>
+        scoreLayout(right, request).total - scoreLayout(left, request).total,
+    )
     .slice(0, candidateCount);
 
   return validateCandidates(candidates, request, "template");
