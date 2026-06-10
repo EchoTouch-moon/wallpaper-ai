@@ -73,8 +73,9 @@ export function TemplatePreviewBar() {
             >
               {/* Preview Box */}
               <div
-                className="relative w-full aspect-[4/3] overflow-hidden rounded-lg bg-white border border-gray-200 mb-3 shadow-sm"
+                className="relative w-full overflow-hidden rounded-lg bg-white border border-gray-200 mb-3 shadow-sm"
                 style={{
+                  aspectRatio: `${candidate.layout.canvas.width} / ${candidate.layout.canvas.height}`,
                   backgroundColor: candidate.layout.canvas.backgroundColor,
                 }}
               >

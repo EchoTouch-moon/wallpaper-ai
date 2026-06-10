@@ -23,6 +23,7 @@ function IconButton({ active, disabled, onClick, children, title }: IconButtonPr
       disabled={disabled}
       onClick={onClick}
       title={title}
+      aria-label={title}
     >
       {children}
     </button>

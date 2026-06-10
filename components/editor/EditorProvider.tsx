@@ -92,7 +92,7 @@ export interface EditorCommands {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   exportPng: () => Promise<void>;
-  updateSelectedObject: (properties: { opacity?: number; style?: Partial<WallpaperItem["style"]> }) => void;
+  updateSelectedObject: (properties: { opacity?: number; style?: Partial<WallpaperItem["style"]> }, commit?: boolean) => void;
   updateCanvasBackground: (color: string) => void;
 }
 
@@ -629,8 +629,9 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     canvas.remove(...backdrops);
     canvas.requestRenderAll();
     syncCanvasState();
+    commitCurrentCanvasLayout();
     useEditorStore.getState().setNotice("Backdrop removed");
-  }, [syncCanvasState]);
+  }, [syncCanvasState, commitCurrentCanvasLayout]);
 
   const createBlurredBackdrop = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -679,8 +680,9 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     canvas.setActiveObject(source);
     canvas.requestRenderAll();
     syncCanvasState();
+    commitCurrentCanvasLayout();
     useEditorStore.getState().setNotice("Soft blurred backdrop created");
-  }, [fitBackdropToCanvas, syncCanvasState]);
+  }, [fitBackdropToCanvas, syncCanvasState, commitCurrentCanvasLayout]);
 
   const applyCropPreset = useCallback(
     (aspectId: CropAspectId) => {
@@ -834,7 +836,10 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
   }, [applyLayout, syncCanvasState]);
 
   const updateSelectedObject = useCallback(
-    (properties: { opacity?: number; style?: Partial<NonNullable<WallpaperItem["style"]>> }) => {
+    (
+      properties: { opacity?: number; style?: Partial<NonNullable<WallpaperItem["style"]>> },
+      commit: boolean = true
+    ) => {
       const canvas = canvasRef.current;
       const activeObject = canvas?.getActiveObject();
       if (!canvas || !(activeObject instanceof FabricImage)) {
@@ -897,7 +902,9 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       image.set({ dirty: true });
       canvas.requestRenderAll();
       syncCanvasState();
-      commitCurrentCanvasLayout();
+      if (commit) {
+        commitCurrentCanvasLayout();
+      }
     },
     [syncCanvasState, commitCurrentCanvasLayout],
   );

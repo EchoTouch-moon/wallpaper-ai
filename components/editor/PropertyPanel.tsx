@@ -92,8 +92,9 @@ export function PropertyPanel() {
               <div className="flex items-center gap-1.5">
                 <input 
                   type="color" 
-                  className="w-5 h-5 border border-gray-200 rounded cursor-pointer p-0 bg-transparent"
+                  className="w-5 h-5 border border-gray-200 rounded cursor-pointer p-0 bg-transparent disabled:opacity-30 disabled:cursor-not-allowed"
                   value={rgbToHex(canvasBackgroundColor)} 
+                  disabled={!currentLayout}
                   onChange={(e) => updateCanvasBackground(e.target.value)}
                 />
                 <span className="text-[10px] text-gray-500 uppercase tracking-widest">{canvasBackgroundColor}</span>
@@ -136,7 +137,15 @@ export function PropertyPanel() {
                   value={selectedObject.opacity}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    updateSelectedObject({ opacity: val / 100 });
+                    updateSelectedObject({ opacity: val / 100 }, false);
+                  }}
+                  onPointerUp={(e) => {
+                    const val = parseInt((e.target as HTMLInputElement).value, 10);
+                    updateSelectedObject({ opacity: val / 100 }, true);
+                  }}
+                  onKeyUp={(e) => {
+                    const val = parseInt((e.target as HTMLInputElement).value, 10);
+                    updateSelectedObject({ opacity: val / 100 }, true);
                   }}
                 />
               </div>
@@ -170,7 +179,15 @@ export function PropertyPanel() {
                   value={selectedObject.style?.radius ?? 0}
                   onChange={(e) => {
                     const radiusVal = parseInt(e.target.value, 10);
-                    updateSelectedObject({ style: { radius: radiusVal } });
+                    updateSelectedObject({ style: { radius: radiusVal } }, false);
+                  }}
+                  onPointerUp={(e) => {
+                    const radiusVal = parseInt((e.target as HTMLInputElement).value, 10);
+                    updateSelectedObject({ style: { radius: radiusVal } }, true);
+                  }}
+                  onKeyUp={(e) => {
+                    const radiusVal = parseInt((e.target as HTMLInputElement).value, 10);
+                    updateSelectedObject({ style: { radius: radiusVal } }, true);
                   }}
                 />
               </div>
@@ -197,7 +214,29 @@ export function PropertyPanel() {
                             color: selectedObject.style?.border?.color ?? "rgba(255,255,255,1)",
                           },
                         },
-                      });
+                      }, false);
+                    }}
+                    onPointerUp={(e) => {
+                      const widthVal = parseInt((e.target as HTMLInputElement).value, 10);
+                      updateSelectedObject({
+                        style: {
+                          border: {
+                            width: widthVal,
+                            color: selectedObject.style?.border?.color ?? "rgba(255,255,255,1)",
+                          },
+                        },
+                      }, true);
+                    }}
+                    onKeyUp={(e) => {
+                      const widthVal = parseInt((e.target as HTMLInputElement).value, 10);
+                      updateSelectedObject({
+                        style: {
+                          border: {
+                            width: widthVal,
+                            color: selectedObject.style?.border?.color ?? "rgba(255,255,255,1)",
+                          },
+                        },
+                      }, true);
                     }}
                   />
                 </div>
