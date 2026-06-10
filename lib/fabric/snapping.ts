@@ -21,12 +21,7 @@ export interface SnapSession {
   y: AxisSnapLock | null;
 }
 
-interface SnappableObject extends FabricObject {
-  role?: "hero" | "support" | "background";
-}
-
 const SNAP_THRESHOLD_PX = 5; // Visual guide line visibility threshold (in pixels)
-const SNAP_RELEASE_THRESHOLD_PX = 6; // Unused for snap-less guidelines
 
 function getAxisAnchors(start: number, size: number) {
   return [start, start + size / 2, start + size];
@@ -141,7 +136,6 @@ export function snapObjectToGeometry(
   target: FabricObject,
   documentWidth: number,
   documentHeight: number,
-  session: SnapSession,
 ): SnapGuides {
   const xCandidates: SnapCandidate[] = [
     { value: 0 },

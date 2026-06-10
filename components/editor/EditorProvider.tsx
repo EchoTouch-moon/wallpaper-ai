@@ -62,7 +62,10 @@ interface CropDragState {
 
 interface ObjectMovingEvent {
   target: FabricObject;
-  e?: any;
+  e?: {
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+  };
   transform?: {
     original: {
       left: number;
@@ -305,7 +308,6 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
                 target,
                 canvasSize.width,
                 canvasSize.height,
-                snapSessionRef.current,
               ),
             );
         } else {
