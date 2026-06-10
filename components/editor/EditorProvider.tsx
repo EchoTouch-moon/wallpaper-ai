@@ -437,13 +437,13 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
             };
 
             swapDragStateRef.current = null;
-            const activeId = target.objectId;
+            const draggedAssetId = target.assetId;
 
             await applyLayout(newLayout, true);
 
-            if (activeId) {
+            if (draggedAssetId) {
               const newActiveObject = canvas.getObjects().find(
-                (obj) => (obj as EditorFabricObject).objectId === activeId
+                (obj) => (obj as EditorFabricObject).assetId === draggedAssetId
               );
               if (newActiveObject) {
                 canvas.setActiveObject(newActiveObject);
