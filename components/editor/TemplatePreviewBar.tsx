@@ -1,8 +1,12 @@
 "use client";
 
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { generateLayoutCandidates } from "@/lib/layout/generateLayoutCandidates";
+import { generateLayouts } from "@/lib/layout-generation/generateLayouts";
 import { useEditorStore } from "@/store/editorStore";
+import type {
+  GenerateLayoutRequest,
+  GenerateLayoutResponse,
+} from "@/types/generateLayout";
 
 export function TemplatePreviewBar() {
   const assets = useEditorStore((state) => state.assets);
@@ -16,21 +20,48 @@ export function TemplatePreviewBar() {
   const { applyLayout } = useEditorCommands();
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
 
-  const generate = () => {
+  const generate = async () => {
     if (assets.length < 3) {
       return;
     }
-    try {
-      const result = generateLayoutCandidates({
-        analyses: assets.map((asset) => asset.analysis),
-        canvasSize,
+    const request: GenerateLayoutRequest = {
+      canvas: {
+        width: canvasSize.width,
+        height: canvasSize.height,
         ratioId,
-        intent: compositionIntent,
+      },
+      intent: {
+        mode: "mock-ai",
+        style: "auto",
+        compositionIntent,
+        count: 3,
+      },
+      assets: assets.map((asset) => asset.analysis),
+      options: {
+        candidateCount: 3,
+        allowFallback: true,
+        strictValidation: true,
+      },
+    };
+
+    try {
+      const response = await fetch("/api/generate-layout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
       });
+
+      if (!response.ok) {
+        throw new Error("Layout API request failed");
+      }
+
+      const result = (await response.json()) as GenerateLayoutResponse;
       setCandidates(result.candidates);
-      setNotice("已生成三组基于色彩感知的三分屏布局");
+      setNotice("已生成智能排版候选");
     } catch {
-      setNotice("无法生成三分屏布局模板");
+      const fallback = generateLayouts(request);
+      setCandidates(fallback.candidates);
+      setNotice("已使用本地 Mock AI 生成候选");
     }
   };
 
@@ -75,8 +106,9 @@ export function TemplatePreviewBar() {
             >
               {/* Preview Box */}
               <div
-                className="relative w-full aspect-[4/3] overflow-hidden rounded-lg bg-white border border-gray-200 mb-3 shadow-sm"
+                className="relative w-full overflow-hidden rounded-lg bg-white border border-gray-200 mb-3 shadow-sm"
                 style={{
+                  aspectRatio: `${candidate.layout.canvas.width} / ${candidate.layout.canvas.height}`,
                   backgroundColor: candidate.layout.canvas.backgroundColor,
                 }}
               >
