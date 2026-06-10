@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createInvalidJsonResponse,
   handleGenerateLayoutRequest,
+  handleGenerateLayoutRequestAsync,
 } from "../../../lib/layout-generation/handleGenerateLayoutRequest.ts";
 
 function analysis(assetId, averageColor) {
@@ -104,4 +105,27 @@ test("generate-layout API returns 422 when AI fallback is disabled", () => {
   assert.equal(response.status, 422);
   assert.equal(response.body.code, "generation_failed");
   assert.match(response.body.error, /fallback is disabled/);
+});
+
+test("generate-layout async API path uses the disabled AI adapter fallback", async () => {
+  const response = await handleGenerateLayoutRequestAsync({
+    ...requestBody,
+    intent: { ...requestBody.intent, mode: "ai" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.source, "fallback");
+  assert.ok(response.body.warnings?.[0].includes("disabled"));
+});
+
+test("generate-layout async API path returns 422 when disabled AI fallback is disallowed", async () => {
+  const response = await handleGenerateLayoutRequestAsync({
+    ...requestBody,
+    intent: { ...requestBody.intent, mode: "ai" },
+    options: { allowFallback: false },
+  });
+
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "generation_failed");
+  assert.match(response.body.error, /disabled/);
 });

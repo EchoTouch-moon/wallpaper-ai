@@ -1,61 +1,19 @@
 import { createAiFallbackResponse } from "./adapters.ts";
+import {
+  LayoutGenerationError,
+  ensureGenerated,
+  isFallbackAllowed,
+} from "./generationFallback.ts";
 import { generateFromTemplate } from "./generateFromTemplate.ts";
 import { generateMockLayouts } from "./generateMockLayouts.ts";
+import { OpenAILayoutAdapter } from "./openAiLayoutAdapter.ts";
 import { generateLayoutRequestSchema } from "./schema.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
 } from "@/types/generateLayout";
 
-export class LayoutGenerationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "LayoutGenerationError";
-  }
-}
-
-function isFallbackAllowed(request: GenerateLayoutRequest) {
-  return request.options?.allowFallback !== false;
-}
-
-function createFallbackResponse(
-  request: GenerateLayoutRequest,
-  warning: string,
-): GenerateLayoutResponse {
-  const result = generateMockLayouts({
-    ...request,
-    intent: {
-      ...request.intent,
-      mode: "mock-ai",
-    },
-  });
-
-  if (result.candidates.length === 0) {
-    throw new LayoutGenerationError("Fallback generation produced no valid layouts.");
-  }
-
-  return {
-    ...result,
-    source: "fallback",
-    warnings: [warning],
-  };
-}
-
-function ensureGenerated(
-  response: GenerateLayoutResponse,
-  request: GenerateLayoutRequest,
-  fallbackWarning: string,
-) {
-  if (response.candidates.length > 0) {
-    return response;
-  }
-
-  if (isFallbackAllowed(request)) {
-    return createFallbackResponse(request, fallbackWarning);
-  }
-
-  throw new LayoutGenerationError("No valid layout candidates were generated.");
-}
+export { LayoutGenerationError } from "./generationFallback.ts";
 
 export function generateLayouts(
   input: GenerateLayoutRequest,
@@ -91,4 +49,17 @@ export function generateLayouts(
   }
 
   return createAiFallbackResponse(request);
+}
+
+export async function generateLayoutsAsync(
+  input: GenerateLayoutRequest,
+): Promise<GenerateLayoutResponse> {
+  const request = generateLayoutRequestSchema.parse(input);
+
+  if (request.intent.mode !== "ai") {
+    return generateLayouts(request);
+  }
+
+  const adapter = new OpenAILayoutAdapter();
+  return adapter.generateLayoutResponse(request);
 }

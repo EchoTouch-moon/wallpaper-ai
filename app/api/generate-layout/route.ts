@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createInvalidJsonResponse,
-  handleGenerateLayoutRequest,
+  handleGenerateLayoutRequestAsync,
 } from "../../../lib/layout-generation/handleGenerateLayoutRequest.ts";
 
 export async function POST(request: Request) {
@@ -14,6 +14,6 @@ export async function POST(request: Request) {
     return NextResponse.json(result.body, { status: result.status });
   }
 
-  const result = handleGenerateLayoutRequest(body);
+  const result = await handleGenerateLayoutRequestAsync(body);
   return NextResponse.json(result.body, { status: result.status });
 }

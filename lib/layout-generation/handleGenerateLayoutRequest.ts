@@ -1,8 +1,9 @@
 import { ZodError } from "zod";
 import {
-  LayoutGenerationError,
   generateLayouts,
+  generateLayoutsAsync,
 } from "./generateLayouts.ts";
+import { LayoutGenerationError } from "./generationFallback.ts";
 import { generateLayoutRequestSchema } from "./schema.ts";
 import type { GenerateLayoutResponse } from "@/types/generateLayout";
 
@@ -110,41 +111,72 @@ export function handleGenerateLayoutRequest(
       body: generateLayouts(input),
     };
   } catch (error) {
-    if (error instanceof ZodError) {
+    return handleGenerateLayoutError(error);
+  }
+}
+
+export async function handleGenerateLayoutRequestAsync(
+  body: unknown,
+): Promise<GenerateLayoutHandlerResponse> {
+  try {
+    const unsupportedIssues = findUnsupportedPayloadFields(body);
+
+    if (unsupportedIssues.length > 0) {
       return {
         status: 400,
         body: {
           error: "Invalid generate-layout request",
           code: "invalid_request",
-          issues: error.issues.map((issue) => ({
-            path: formatPath(
-              issue.path.filter(
-                (part): part is string | number =>
-                  typeof part === "string" || typeof part === "number",
-              ),
-            ),
-            message: issue.message,
-          })),
+          issues: unsupportedIssues,
         },
       };
     }
 
-    if (error instanceof LayoutGenerationError) {
-      return {
-        status: 422,
-        body: {
-          error: error.message,
-          code: "generation_failed",
-        },
-      };
-    }
-
+    const input = generateLayoutRequestSchema.parse(body);
     return {
-      status: 500,
+      status: 200,
+      body: await generateLayoutsAsync(input),
+    };
+  } catch (error) {
+    return handleGenerateLayoutError(error);
+  }
+}
+
+function handleGenerateLayoutError(error: unknown): GenerateLayoutHandlerResponse {
+  if (error instanceof ZodError) {
+    return {
+      status: 400,
       body: {
-        error:
-          error instanceof Error ? error.message : "Unable to generate layouts",
+        error: "Invalid generate-layout request",
+        code: "invalid_request",
+        issues: error.issues.map((issue) => ({
+          path: formatPath(
+            issue.path.filter(
+              (part): part is string | number =>
+                typeof part === "string" || typeof part === "number",
+            ),
+          ),
+          message: issue.message,
+        })),
       },
     };
   }
+
+  if (error instanceof LayoutGenerationError) {
+    return {
+      status: 422,
+      body: {
+        error: error.message,
+        code: "generation_failed",
+      },
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      error:
+        error instanceof Error ? error.message : "Unable to generate layouts",
+    },
+  };
 }
