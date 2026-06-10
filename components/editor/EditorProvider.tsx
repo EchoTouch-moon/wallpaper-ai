@@ -13,6 +13,8 @@ import {
   FabricImage,
   FabricObject,
   filters,
+  Rect,
+  Shadow,
   type Canvas as FabricCanvas,
 } from "fabric";
 import {
@@ -20,7 +22,7 @@ import {
   calculateCropPan,
 } from "@/lib/fabric/crop";
 import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
-import { applyLayoutToCanvas } from "@/lib/fabric/applyLayout";
+import { applyLayoutToCanvas, type LayoutFabricImage } from "@/lib/fabric/applyLayout";
 import { serializeCanvasLayout } from "@/lib/fabric/serializeLayout";
 import {
   createSnapSession,
@@ -60,6 +62,7 @@ interface CropDragState {
 
 interface ObjectMovingEvent {
   target: FabricObject;
+  e?: any;
   transform?: {
     original: {
       left: number;
@@ -89,6 +92,8 @@ export interface EditorCommands {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   exportPng: () => Promise<void>;
+  updateSelectedObject: (properties: { opacity?: number; style?: Partial<WallpaperItem["style"]> }) => void;
+  updateCanvasBackground: (color: string) => void;
 }
 
 const EditorContext = createContext<EditorCommands | null>(null);
@@ -130,6 +135,7 @@ function readObjectSnapshot(object: EditorFabricObject): CanvasObjectSnapshot {
     height: Math.round(object.getScaledHeight()),
     rotation: Math.round(object.angle),
     opacity: Math.round(object.opacity * 100),
+    style: object.layoutStyle,
   };
 }
 
@@ -287,18 +293,28 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         });
         resetSnapSession(snapSessionRef.current);
       } else {
-        const { canvasSize } = useEditorStore.getState();
-        useEditorStore
-          .getState()
-          .setSnapGuides(
-            snapObjectToGeometry(
-              canvas,
-              target,
-              canvasSize.width,
-              canvasSize.height,
-              snapSessionRef.current,
-            ),
-          );
+        const { canvasSize, enableSnapping } = useEditorStore.getState();
+        const hasBypassKey = event.e && (event.e.metaKey || event.e.ctrlKey);
+
+        if (enableSnapping && !hasBypassKey) {
+          useEditorStore
+            .getState()
+            .setSnapGuides(
+              snapObjectToGeometry(
+                canvas,
+                target,
+                canvasSize.width,
+                canvasSize.height,
+                snapSessionRef.current,
+              ),
+            );
+        } else {
+          useEditorStore.getState().setSnapGuides({
+            vertical: [],
+            horizontal: [],
+          });
+          resetSnapSession(snapSessionRef.current);
+        }
       }
 
       canvas.requestRenderAll();
@@ -817,6 +833,88 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     }
   }, [applyLayout, syncCanvasState]);
 
+  const updateSelectedObject = useCallback(
+    (properties: { opacity?: number; style?: Partial<NonNullable<WallpaperItem["style"]>> }) => {
+      const canvas = canvasRef.current;
+      const activeObject = canvas?.getActiveObject();
+      if (!canvas || !(activeObject instanceof FabricImage)) {
+        return;
+      }
+
+      const image = activeObject as LayoutFabricImage;
+
+      if (properties.opacity !== undefined) {
+        image.set({ opacity: properties.opacity });
+      }
+
+      if (properties.style !== undefined) {
+        const nextStyle = { ...image.layoutStyle, ...properties.style };
+        image.layoutStyle = nextStyle;
+
+        // Apply radius changes
+        if (properties.style.radius !== undefined) {
+          if (properties.style.radius > 0) {
+            const scale = Math.max(Math.abs(image.scaleX), 0.001);
+            image.clipPath = new Rect({
+              width: image.width,
+              height: image.height,
+              rx: properties.style.radius / scale,
+              ry: properties.style.radius / scale,
+              originX: "center",
+              originY: "center",
+            });
+          } else {
+            image.clipPath = undefined;
+          }
+        }
+
+        // Apply shadow changes
+        if (properties.style.shadow !== undefined) {
+          if (properties.style.shadow !== "none") {
+            image.shadow = new Shadow({
+              color:
+                properties.style.shadow === "strong"
+                  ? "rgba(24, 34, 50, 0.34)"
+                  : "rgba(24, 34, 50, 0.2)",
+              blur: properties.style.shadow === "strong" ? 36 : 22,
+              offsetX: 0,
+              offsetY: properties.style.shadow === "strong" ? 18 : 10,
+            });
+          } else {
+            image.shadow = null;
+          }
+        }
+
+        // Apply border changes
+        if (properties.style.border !== undefined) {
+          image.set({
+            stroke: properties.style.border.color,
+            strokeWidth: properties.style.border.width ?? 0,
+          });
+        }
+      }
+
+      image.set({ dirty: true });
+      canvas.requestRenderAll();
+      syncCanvasState();
+      commitCurrentCanvasLayout();
+    },
+    [syncCanvasState, commitCurrentCanvasLayout],
+  );
+
+  const updateCanvasBackground = useCallback(
+    (color: string) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      canvas.backgroundColor = color;
+      canvas.requestRenderAll();
+      syncCanvasState();
+      commitCurrentCanvasLayout();
+    },
+    [syncCanvasState, commitCurrentCanvasLayout],
+  );
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -1092,6 +1190,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       undo,
       redo,
       exportPng,
+      updateSelectedObject,
+      updateCanvasBackground,
     }),
     [
       addImage,
@@ -1112,6 +1212,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       removeBackdrop,
       removeAsset,
       undo,
+      updateSelectedObject,
+      updateCanvasBackground,
     ],
   );
 
@@ -1119,7 +1221,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     <EditorContext.Provider value={commands}>
       {children}
       {notice ? (
-        <div className="toast" role="status">
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 max-w-[min(90vw,460px)] px-4 py-2.5 bg-black text-white text-xs font-medium rounded-full shadow-lg" role="status">
           {notice}
         </div>
       ) : null}

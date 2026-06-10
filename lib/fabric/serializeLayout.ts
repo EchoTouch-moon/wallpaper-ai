@@ -50,6 +50,10 @@ export function serializeCanvasLayout(
 
   return wallpaperLayoutSchema.parse({
     ...baseLayout,
+    canvas: {
+      ...baseLayout.canvas,
+      backgroundColor: typeof canvas.backgroundColor === "string" ? canvas.backgroundColor : baseLayout.canvas.backgroundColor,
+    },
     items,
   });
 }

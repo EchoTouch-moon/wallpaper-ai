@@ -3,8 +3,7 @@ import Link from "next/link";
 export default function HomePage() {
   return (
     <main className="landing-shell">
-      <span className="landing-orb one" aria-hidden="true" />
-      <span className="landing-orb two" aria-hidden="true" />
+      {/* Removed orbs for minimalism */}
       <div className="landing-card glass-surface">
         <section className="landing-copy">
           <p className="eyebrow">AI Wallpaper Studio</p>

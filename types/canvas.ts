@@ -1,4 +1,5 @@
 import type { SafeArea } from "@/types/wallpaper";
+import type { WallpaperItem } from "@/types/layout";
 
 export interface CanvasSize {
   width: number;
@@ -29,6 +30,7 @@ export interface CanvasObjectSnapshot {
   height: number;
   rotation: number;
   opacity: number;
+  style?: WallpaperItem["style"];
 }
 
 export interface WallpaperCanvas extends CanvasSize {

@@ -43,6 +43,7 @@ interface EditorState {
   historyPast: Array<WallpaperLayout | null>;
   historyFuture: Array<WallpaperLayout | null>;
   showSafeAreas: boolean;
+  enableSnapping: boolean;
   isProjectHydrated: boolean;
   setRatio: (ratioId: WallpaperRatioId) => void;
   addAssets: (assets: ImageAsset[]) => void;
@@ -70,6 +71,7 @@ interface EditorState {
   undoLayout: () => WallpaperLayout | null | undefined;
   redoLayout: () => WallpaperLayout | null | undefined;
   toggleSafeAreas: () => void;
+  toggleSnapping: () => void;
   hydrateProject: (assets: ImageAsset[], project: EditorProject) => void;
   markProjectHydrated: () => void;
   resetEditor: () => void;
@@ -103,6 +105,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   historyPast: [],
   historyFuture: [],
   showSafeAreas: true,
+  enableSnapping: true,
   isProjectHydrated: false,
   setRatio: (ratioId) => {
     const ratio = getRatioPreset(ratioId);
@@ -207,6 +210,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   },
   toggleSafeAreas: () =>
     set((state) => ({ showSafeAreas: !state.showSafeAreas })),
+  toggleSnapping: () =>
+    set((state) => ({ enableSnapping: !state.enableSnapping })),
   hydrateProject: (assets, project) => {
     const ratio = getRatioPreset(project.ratioId);
     set({
@@ -238,6 +243,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       historyPast: [],
       historyFuture: [],
       showSafeAreas: true,
+      enableSnapping: true,
       isProjectHydrated: false,
     }),
 }));

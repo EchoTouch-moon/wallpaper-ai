@@ -8,7 +8,7 @@ import { SAFE_AREA_LABELS } from "@/lib/wallpaper/safeAreas";
 import { useEditorStore } from "@/store/editorStore";
 import { createSafeAreas } from "@/lib/wallpaper/layoutSafeAreas";
 
-const STAGE_PADDING = 40;
+const STAGE_PADDING = 48; // Reduced padding for docked sidebars
 
 export function CanvasStage() {
   const canvasElementRef = useRef<HTMLCanvasElement>(null);
@@ -16,7 +16,6 @@ export function CanvasStage() {
   const fabricRef = useRef<FabricCanvas | null>(null);
   const { registerCanvas } = useEditorCommands();
   const canvasSize = useEditorStore((state) => state.canvasSize);
-  const isCanvasReady = useEditorStore((state) => state.isCanvasReady);
   const setCanvasReady = useEditorStore((state) => state.setCanvasReady);
   const setPreviewScale = useEditorStore((state) => state.setPreviewScale);
   const snapGuides = useEditorStore((state) => state.snapGuides);
@@ -62,7 +61,7 @@ export function CanvasStage() {
       }
 
       const scale = resizeCanvasPreview(fabricCanvas, canvasSize, {
-        width: Math.max(entry.contentRect.width - STAGE_PADDING, 240),
+        width: Math.max(entry.contentRect.width - STAGE_PADDING * 2, 240),
         height: Math.max(entry.contentRect.height - STAGE_PADDING, 180),
       });
       setPreviewScale(scale);
@@ -76,30 +75,36 @@ export function CanvasStage() {
   }, [canvasSize, setPreviewScale]);
 
   return (
-    <div className="canvas-stage" ref={viewportRef}>
-      <div className="canvas-viewport" aria-label="Wallpaper canvas">
-        <canvas ref={canvasElementRef} />
-        <div className="snap-guide-layer" aria-hidden="true">
+    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-auto" ref={viewportRef}>
+      
+      {/* Center dot pattern background */}
+      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: "radial-gradient(#000 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+
+      <div className="relative max-w-full max-h-full grid place-items-center bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-gray-200/60 rounded-sm" aria-label="Wallpaper canvas">
+        <canvas ref={canvasElementRef} className="block" />
+        
+        <div className="absolute inset-0 overflow-hidden pointer-events-none z-10" aria-hidden="true">
           {snapGuides.vertical.map((position) => (
             <i
-              className="snap-guide vertical"
+              className="absolute block w-px top-0 bottom-0 bg-[#0068de] shadow-[0_0_0_1px_rgba(255,255,255,0.8)]"
               key={`vertical-${position}`}
               style={{ left: `${(position / canvasSize.width) * 100}%` }}
             />
           ))}
           {snapGuides.horizontal.map((position) => (
             <i
-              className="snap-guide horizontal"
+              className="absolute block h-px left-0 right-0 bg-[#0068de] shadow-[0_0_0_1px_rgba(255,255,255,0.8)]"
               key={`horizontal-${position}`}
               style={{ top: `${(position / canvasSize.height) * 100}%` }}
             />
           ))}
         </div>
+
         {showSafeAreas ? (
-          <div className="safe-area-layer" aria-hidden="true">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none z-10" aria-hidden="true">
             {safeAreas.map((area) => (
               <i
-                className={`safe-area ${area.type}`}
+                className="absolute block border border-dashed border-black/20 bg-[repeating-linear-gradient(135deg,rgba(0,0,0,0.02)0,rgba(0,0,0,0.02)5px,transparent_5px,transparent_10px)]"
                 key={area.id}
                 style={{
                   left: `${(area.x / canvasSize.width) * 100}%`,
@@ -108,39 +113,26 @@ export function CanvasStage() {
                   height: `${(area.height / canvasSize.height) * 100}%`,
                 }}
               >
-                <span>{SAFE_AREA_LABELS[area.type]}</span>
+                <span className="absolute top-1 left-1.5 px-1.5 py-0.5 rounded bg-white/90 text-gray-700 font-mono text-[8px] uppercase font-semibold">
+                  {SAFE_AREA_LABELS[area.type]}
+                </span>
               </i>
             ))}
           </div>
         ) : null}
       </div>
+
       {cropSession ? (
-        <div className="crop-mode-badge" role="status">
-          Crop mode · drag photo to reframe · Esc to finish
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 border border-gray-200 rounded-full px-4 py-2 bg-white text-black shadow-sm font-medium text-[11px]" role="status">
+          裁剪模式 · 拖拽图片以重新定位 · 按 Esc 键完成
         </div>
       ) : null}
-      <div className="canvas-meta" aria-live="polite">
-        <span>
-          <i className={`status-dot ${isCanvasReady ? "ready" : ""}`} />
-          {isCanvasReady ? "Fabric canvas ready" : "Initializing canvas"}
-        </span>
-        <span>
-          {canvasSize.width} × {canvasSize.height}
-        </span>
-      </div>
-      <div className="shortcut-hint" aria-label="Keyboard shortcuts">
-        <span>
-          <kbd>Tab</kbd> Focus
-        </span>
-        <span>
-          <kbd>⌘D</kbd> Duplicate
-        </span>
-        <span>
-          <kbd>↑↓←→</kbd> Nudge
-        </span>
-        <span>
-          <kbd>⌫</kbd> Delete
-        </span>
+
+      <div className="absolute bottom-4 left-4 flex gap-3 text-gray-400 text-[10px] z-0" aria-label="快捷键">
+        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">Tab</kbd> 切换聚焦</span>
+        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">⌘D</kbd> 复制</span>
+        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">↑↓←→</kbd> 微调</span>
+        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">⌫</kbd> 删除</span>
       </div>
     </div>
   );

@@ -25,8 +25,8 @@ interface SnappableObject extends FabricObject {
   role?: "hero" | "support" | "background";
 }
 
-const SNAP_THRESHOLD_PX = 8;
-const SNAP_RELEASE_THRESHOLD_PX = 14;
+const SNAP_THRESHOLD_PX = 5; // Visual guide line visibility threshold (in pixels)
+const SNAP_RELEASE_THRESHOLD_PX = 6; // Unused for snap-less guidelines
 
 function getAxisAnchors(start: number, size: number) {
   return [start, start + size / 2, start + size];
@@ -143,10 +143,6 @@ export function snapObjectToGeometry(
   documentHeight: number,
   session: SnapSession,
 ): SnapGuides {
-  if (session.target !== target) {
-    resetSnapSession(session, target);
-  }
-
   const xCandidates: SnapCandidate[] = [
     { value: 0 },
     { value: documentWidth / 2 },
@@ -158,59 +154,23 @@ export function snapObjectToGeometry(
     { value: documentHeight },
   ];
 
-  canvas.getObjects().forEach((object) => {
-    const snappable = object as SnappableObject;
-    if (
-      object === target ||
-      object.isDescendantOf(target) ||
-      snappable.role === "background" ||
-      !object.visible
-    ) {
-      return;
-    }
-
-    const bounds = object.getBoundingRect();
-    getAxisAnchors(bounds.left, bounds.width).forEach((value) =>
-      xCandidates.push({ value }),
-    );
-    getAxisAnchors(bounds.top, bounds.height).forEach((value) =>
-      yCandidates.push({ value }),
-    );
-  });
-
   const bounds = target.getBoundingRect();
   const zoom = Math.max(canvas.getZoom(), 0.01);
   const threshold = SNAP_THRESHOLD_PX / zoom;
-  const releaseThreshold = SNAP_RELEASE_THRESHOLD_PX / zoom;
-  const xState = resolveAxisSnap(
+
+  const xClosest = findClosestSnapMatch(
     getAxisAnchors(bounds.left, bounds.width),
     xCandidates,
     threshold,
-    releaseThreshold,
-    session.x,
   );
-  const yState = resolveAxisSnap(
+  const yClosest = findClosestSnapMatch(
     getAxisAnchors(bounds.top, bounds.height),
     yCandidates,
     threshold,
-    releaseThreshold,
-    session.y,
   );
-  const xSnap = xState.result;
-  const ySnap = yState.result;
-  session.x = xState.lock;
-  session.y = yState.lock;
-
-  if (xSnap.guide !== undefined || ySnap.guide !== undefined) {
-    target.set({
-      left: target.left + xSnap.delta,
-      top: target.top + ySnap.delta,
-    });
-    target.setCoords();
-  }
 
   return {
-    vertical: xSnap.guide === undefined ? [] : [xSnap.guide],
-    horizontal: ySnap.guide === undefined ? [] : [ySnap.guide],
+    vertical: xClosest ? [xClosest.guide] : [],
+    horizontal: yClosest ? [yClosest.guide] : [],
   };
 }
