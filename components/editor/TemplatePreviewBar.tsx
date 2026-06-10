@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { generateLayouts } from "@/lib/layout-generation/generateLayouts";
 import { useEditorStore } from "@/store/editorStore";
@@ -63,6 +64,7 @@ function getRecommendationSummary(candidate: LayoutCandidate) {
 }
 
 export function TemplatePreviewBar() {
+  const [isGenerating, setIsGenerating] = useState(false);
   const assets = useEditorStore((state) => state.assets);
   const candidates = useEditorStore((state) => state.candidates);
   const canvasSize = useEditorStore((state) => state.canvasSize);
@@ -75,7 +77,7 @@ export function TemplatePreviewBar() {
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
 
   const generate = async () => {
-    if (assets.length < 3) {
+    if (assets.length < 3 || isGenerating) {
       return;
     }
     const request: GenerateLayoutRequest = {
@@ -98,24 +100,43 @@ export function TemplatePreviewBar() {
       },
     };
 
+    setIsGenerating(true);
+
     try {
-      const response = await fetch("/api/generate-layout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      });
+      try {
+        const response = await fetch("/api/generate-layout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        });
 
-      if (!response.ok) {
-        throw new Error("Layout API request failed");
+        if (!response.ok) {
+          throw new Error("Layout API request failed");
+        }
+
+        const result = (await response.json()) as GenerateLayoutResponse;
+
+        if (result.candidates.length === 0) {
+          throw new Error("Layout API returned no candidates");
+        }
+
+        setCandidates(result.candidates);
+        setNotice(result.warnings?.[0] ?? "已生成智能排版候选");
+        return;
+      } catch {
+        const fallback = generateLayouts(request);
+
+        if (fallback.candidates.length === 0) {
+          throw new Error("Local fallback returned no candidates");
+        }
+
+        setCandidates(fallback.candidates);
+        setNotice(fallback.warnings?.[0] ?? "已使用本地 Mock AI 生成候选");
       }
-
-      const result = (await response.json()) as GenerateLayoutResponse;
-      setCandidates(result.candidates);
-      setNotice("已生成智能排版候选");
     } catch {
-      const fallback = generateLayouts(request);
-      setCandidates(fallback.candidates);
-      setNotice("已使用本地 Mock AI 生成候选");
+      setNotice("暂时无法生成排版，请检查图片分析结果后重试");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -143,10 +164,10 @@ export function TemplatePreviewBar() {
       <button 
         className="btn-primary w-full py-2 text-xs font-semibold rounded-lg transition-colors mb-5 shadow-sm shrink-0"
         type="button" 
-        disabled={assets.length < 3} 
+        disabled={assets.length < 3 || isGenerating} 
         onClick={generate}
       >
-        生成智能排版模板
+        {isGenerating ? "正在生成排版..." : "生成智能排版模板"}
       </button>
       
       {candidates.length > 0 ? (
