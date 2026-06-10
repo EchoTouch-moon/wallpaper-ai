@@ -23,3 +23,4 @@ export type WallpaperItem = WallpaperLayout["items"][number];
 export type LayoutCandidate = z.infer<typeof layoutCandidateSchema>;
 export type EditorProject = z.infer<typeof editorProjectSchema>;
 export type TemplateType = WallpaperTemplate["type"];
+export type TemplateSlot = WallpaperTemplate["slots"][number];

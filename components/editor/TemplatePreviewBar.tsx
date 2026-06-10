@@ -1,7 +1,7 @@
 "use client";
 
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { generateTriptychCandidates } from "@/lib/layout/planTriptych";
+import { generateLayoutCandidates } from "@/lib/layout/generateLayoutCandidates";
 import { useEditorStore } from "@/store/editorStore";
 
 export function TemplatePreviewBar() {
@@ -9,6 +9,7 @@ export function TemplatePreviewBar() {
   const candidates = useEditorStore((state) => state.candidates);
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const ratioId = useEditorStore((state) => state.ratioId);
+  const compositionIntent = useEditorStore((state) => state.compositionIntent);
   const setCandidates = useEditorStore((state) => state.setCandidates);
   const setNotice = useEditorStore((state) => state.setNotice);
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
@@ -20,12 +21,13 @@ export function TemplatePreviewBar() {
       return;
     }
     try {
-      const nextCandidates = generateTriptychCandidates(
-        assets.map((asset) => asset.analysis),
+      const result = generateLayoutCandidates({
+        analyses: assets.map((asset) => asset.analysis),
         canvasSize,
         ratioId,
-      );
-      setCandidates(nextCandidates);
+        intent: compositionIntent,
+      });
+      setCandidates(result.candidates);
       setNotice("已生成三组基于色彩感知的三分屏布局");
     } catch {
       setNotice("无法生成三分屏布局模板");
