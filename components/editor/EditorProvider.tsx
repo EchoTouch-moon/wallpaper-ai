@@ -24,6 +24,7 @@ import {
 import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
 import { applyLayoutToCanvas, type LayoutFabricImage } from "@/lib/fabric/applyLayout";
 import { serializeCanvasLayout } from "@/lib/fabric/serializeLayout";
+import { swapLayoutItemAssets } from "@/lib/layout/swap";
 import {
   createSnapSession,
   resetSnapSession,
@@ -174,11 +175,55 @@ function findHitTarget(draggedObject: EditorFabricObject, canvas: FabricCanvas) 
   return null;
 }
 
+function animateObjectPosition(
+  target: FabricObject,
+  fromLeft: number,
+  fromTop: number,
+  toLeft: number,
+  toTop: number,
+  duration: number,
+  canvas: FabricCanvas,
+  onComplete?: () => void,
+) {
+  const startTime = performance.now();
+
+  function tick(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+
+    // Easing function (easeOutQuad)
+    const ease = progress * (2 - progress);
+
+    target.set({
+      left: fromLeft + (toLeft - fromLeft) * ease,
+      top: fromTop + (toTop - fromTop) * ease,
+      dirty: true,
+    });
+    target.setCoords();
+    canvas.requestRenderAll();
+
+    if (progress < 1) {
+      requestAnimationFrame(tick);
+    } else {
+      if (onComplete) {
+        onComplete();
+      }
+    }
+  }
+
+  requestAnimationFrame(tick);
+}
+
 export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) {
   const canvasRef = useRef<FabricCanvas | null>(null);
   const boundCanvasRef = useRef<FabricCanvas | null>(null);
   const cropDragRef = useRef<CropDragState | null>(null);
   const swapDragStateRef = useRef<SwapDragState | null>(null);
+  const highlightedTargetRef = useRef<{
+    target: LayoutFabricImage;
+    originalStroke: FabricObject["stroke"];
+    originalStrokeWidth: FabricObject["strokeWidth"];
+  } | null>(null);
   const isApplyingLayoutRef = useRef(false);
   const snapSessionRef = useRef(createSnapSession());
   const pendingRestoreRef = useRef<WallpaperLayout | null>(null);
@@ -363,6 +408,44 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
               top: originalTop,
             };
           }
+
+          // Target feedback highlight check
+          const hit = findHitTarget(target, canvas);
+          if (hit) {
+            if (highlightedTargetRef.current?.target !== hit) {
+              // Restore previous highlighted target's border if any
+              if (highlightedTargetRef.current && canvas.getObjects().includes(highlightedTargetRef.current.target)) {
+                highlightedTargetRef.current.target.set({
+                  stroke: highlightedTargetRef.current.originalStroke,
+                  strokeWidth: highlightedTargetRef.current.originalStrokeWidth,
+                  dirty: true,
+                });
+              }
+              // Highlight new hit target
+              highlightedTargetRef.current = {
+                target: hit,
+                originalStroke: hit.stroke,
+                originalStrokeWidth: hit.strokeWidth,
+              };
+              hit.set({
+                stroke: "#168cff",
+                strokeWidth: 4,
+                dirty: true,
+              });
+            }
+          } else {
+            // Restore previous highlighted target's borders since no target is hit
+            if (highlightedTargetRef.current) {
+              if (canvas.getObjects().includes(highlightedTargetRef.current.target)) {
+                highlightedTargetRef.current.target.set({
+                  stroke: highlightedTargetRef.current.originalStroke,
+                  strokeWidth: highlightedTargetRef.current.originalStrokeWidth,
+                  dirty: true,
+                });
+              }
+              highlightedTargetRef.current = null;
+            }
+          }
         }
 
         const hasBypassKey = event.e && (event.e.metaKey || event.e.ctrlKey);
@@ -403,6 +486,18 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     const canvas = canvasRef.current;
     const swapDrag = swapDragStateRef.current;
 
+    // Restore any active highlight stroke first
+    if (canvas && highlightedTargetRef.current) {
+      if (canvas.getObjects().includes(highlightedTargetRef.current.target)) {
+        highlightedTargetRef.current.target.set({
+          stroke: highlightedTargetRef.current.originalStroke,
+          strokeWidth: highlightedTargetRef.current.originalStrokeWidth,
+          dirty: true,
+        });
+      }
+      highlightedTargetRef.current = null;
+    }
+
     if (swapDrag && canvas) {
       const target = canvas.getActiveObject() as EditorFabricObject | undefined;
       if (target && target.objectId === swapDrag.objectId) {
@@ -413,33 +508,13 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
             const idA = target.objectId;
             const idB = hitTarget.objectId;
 
-            const newItems = currentLayout.items.map((item) => {
-              if (item.id === idA) {
-                const otherItem = currentLayout.items.find((it) => it.id === idB);
-                return {
-                  ...item,
-                  assetId: otherItem ? otherItem.assetId : item.assetId,
-                };
-              }
-              if (item.id === idB) {
-                const otherItem = currentLayout.items.find((it) => it.id === idA);
-                return {
-                  ...item,
-                  assetId: otherItem ? otherItem.assetId : item.assetId,
-                };
-              }
-              return item;
-            });
-
-            const newLayout = {
-              ...currentLayout,
-              items: newItems,
-            };
+            const newLayout = swapLayoutItemAssets(currentLayout, idA, idB);
 
             swapDragStateRef.current = null;
             const draggedAssetId = target.assetId;
 
             await applyLayout(newLayout, true);
+            useEditorStore.getState().setNotice("照片位置已交换");
 
             if (draggedAssetId) {
               const newActiveObject = canvas.getObjects().find(
@@ -455,14 +530,27 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
           }
         }
 
-        // Restore original position
-        target.set({
-          left: swapDrag.left,
-          top: swapDrag.top,
-          dirty: true,
-        });
-        target.setCoords();
-        canvas.requestRenderAll();
+        // Restore original position with rebound animation
+        const currentLeft = target.left;
+        const currentTop = target.top;
+        const originalLeft = swapDrag.left;
+        const originalTop = swapDrag.top;
+
+        swapDragStateRef.current = null;
+
+        animateObjectPosition(
+          target,
+          currentLeft,
+          currentTop,
+          originalLeft,
+          originalTop,
+          150,
+          canvas,
+          () => {
+            syncCanvasState();
+          }
+        );
+        return;
       }
 
       swapDragStateRef.current = null;
