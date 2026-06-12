@@ -190,3 +190,55 @@ test("generate-layout validates refine requests before calling the provider", as
     response.body.issues.some((issue) => issue.path === "currentLayout"),
   );
 });
+
+test("generate-layout sends refine operation and current layout to provider", async () => {
+  const generated = handleGenerateLayoutRequest(requestBody);
+  const currentLayout = generated.body.candidates[0].layout;
+  let capturedOperation = null;
+  let capturedCurrentLayout = null;
+
+  const response = await handleGenerateLayoutRequestAsync(
+    {
+      ...requestBody,
+      operation: "refine",
+      intent: {
+        ...requestBody.intent,
+        mode: "ai",
+        userPrompt: "Make the center image the hero",
+      },
+      currentLayout,
+      options: { candidateCount: 1, allowFallback: false },
+    },
+    {
+      provider: {
+        async generatePlan(input) {
+          capturedOperation = input.operation;
+          capturedCurrentLayout = input.request.currentLayout;
+          return {
+            candidates: [
+              {
+                id: "refined_candidate",
+                label: "Refined triptych",
+                reason: "The center slot now carries the strongest asset.",
+                harmonyScore: 0.92,
+                templateId: "triptych_desktop_equal",
+                assignments: [
+                  { slotId: "left", assetId: "asset_b", crop: null },
+                  { slotId: "center", assetId: "asset_a", crop: null },
+                  { slotId: "right", assetId: "asset_c", crop: null },
+                ],
+                backgroundColor: null,
+              },
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.source, "ai");
+  assert.equal(response.body.candidates.length, 1);
+  assert.equal(capturedOperation, "refine");
+  assert.deepEqual(capturedCurrentLayout, currentLayout);
+});
