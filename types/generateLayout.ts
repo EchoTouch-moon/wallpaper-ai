@@ -5,6 +5,7 @@ import type {
   WallpaperLayout,
 } from "@/types/layout";
 import type { WallpaperRatioId } from "@/types/wallpaper";
+import type { AiLayoutOperation } from "@/lib/layout-generation/aiPlanSchema";
 
 export type GenerateLayoutMode = "template" | "mock-ai" | "ai";
 
@@ -22,6 +23,7 @@ export type GenerateLayoutSource =
   | "fallback";
 
 export interface GenerateLayoutRequest {
+  operation?: AiLayoutOperation;
   canvas: {
     width: number;
     height: number;
