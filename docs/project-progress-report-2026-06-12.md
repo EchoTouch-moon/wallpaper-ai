@@ -1,6 +1,6 @@
 # AI Wallpaper Studio 项目进展报告
 
-报告日期：2026-06-12  
+报告日期：2026-06-12
 集成分支：`codex/integration-ai-layout-v1`
 
 ## 当前结论
