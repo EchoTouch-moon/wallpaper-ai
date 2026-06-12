@@ -24,6 +24,7 @@ LLM_BASE_URL=https://provider.example/v1
 LLM_MODEL=your-model
 LLM_RESPONSE_FORMAT=json_object
 LLM_TIMEOUT_MS=30000
+LLM_SMOKE_TEST=0
 ```
 
 `LLM_BASE_URL` 是 OpenAI-compatible API 根路径，服务端会调用
@@ -39,6 +40,14 @@ Object URL 和 Fabric 对象均不会进入客户端请求或模型提示词。
 
 未配置模型时，AI 模式会显示本地回退结果；也可以在排版面板直接选择
 “本地规则”。
+
+真实模型 Smoke Test 默认不会运行。确认配置后显式启用：
+
+```bash
+LLM_SMOKE_TEST=1 npm run test:ai:smoke
+```
+
+该命令禁用本地回退，只有真实服务返回并通过完整 Layout 校验时才成功。
 
 ## Development
 
