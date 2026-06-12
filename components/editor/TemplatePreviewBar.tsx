@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
+import { createEditorLayoutRequest } from "@/lib/editor/createLayoutRequest";
 import { generateMockLayouts } from "@/lib/layout-generation/generateMockLayouts";
 import { useEditorStore } from "@/store/editorStore";
 import type {
@@ -99,30 +100,16 @@ export function TemplatePreviewBar() {
       return;
     }
 
-    const request: GenerateLayoutRequest = {
+    const request: GenerateLayoutRequest = createEditorLayoutRequest({
       operation,
-      canvas: {
-        width: canvasSize.width,
-        height: canvasSize.height,
-        ratioId,
-      },
-      intent: {
-        mode: generationMode === "ai" ? "ai" : "mock-ai",
-        style: "auto",
-        compositionIntent,
-        count: operation === "refine" ? 1 : 3,
-        userPrompt:
-          operation === "refine" ? refinePrompt.trim() : undefined,
-      },
+      mode: generationMode === "ai" ? "ai" : "mock-ai",
+      canvasSize,
+      ratioId,
+      compositionIntent,
       assets: assets.map((asset) => asset.analysis),
-      currentLayout:
-        operation === "refine" ? (currentLayout ?? undefined) : undefined,
-      options: {
-        candidateCount: operation === "refine" ? 1 : 3,
-        allowFallback: true,
-        strictValidation: true,
-      },
-    };
+      currentLayout,
+      userPrompt: refinePrompt,
+    });
 
     setIsGenerating(true);
 

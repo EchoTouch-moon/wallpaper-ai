@@ -29,7 +29,7 @@ export class LayoutProviderError extends Error {
   }
 }
 
-function classifyProviderError(error: unknown) {
+export function classifyProviderError(error: unknown) {
   if (error instanceof LayoutProviderError) {
     return error;
   }
@@ -53,6 +53,38 @@ function classifyProviderError(error: unknown) {
       "provider_error",
       `Layout model request failed with status ${error.status ?? "unknown"}`,
     );
+  }
+  if (typeof error === "object" && error !== null) {
+    const status =
+      "status" in error && typeof error.status === "number"
+        ? error.status
+        : null;
+    const name =
+      "name" in error && typeof error.name === "string" ? error.name : "";
+    if (status === 401 || status === 403) {
+      return new LayoutProviderError(
+        "authentication",
+        "Layout model authentication failed",
+      );
+    }
+    if (status === 429) {
+      return new LayoutProviderError(
+        "rate_limit",
+        "Layout model rate limit exceeded",
+      );
+    }
+    if (name === "AbortError" || name.includes("Timeout")) {
+      return new LayoutProviderError(
+        "timeout",
+        "Layout model request timed out",
+      );
+    }
+    if (status !== null && status >= 500) {
+      return new LayoutProviderError(
+        "provider_error",
+        `Layout model request failed with status ${status}`,
+      );
+    }
   }
   return new LayoutProviderError(
     "provider_error",
