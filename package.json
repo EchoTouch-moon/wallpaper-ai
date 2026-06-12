@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "node --test --experimental-strip-types lib/*/*.test.mjs app/api/*/*.test.mjs",
+    "test:ai:smoke": "node --experimental-strip-types scripts/smoke-layout-model.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
