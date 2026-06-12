@@ -38,7 +38,7 @@ Layout JSON 基线之上，已增加兼容多种 OpenAI 请求协议服务的模
 
 ## 验证结果
 
-- Node 单元/API 测试：78 项通过。
+- Node 单元/API 测试：70 项有效测试通过。
 - Playwright Chromium E2E：1 项通过。
 - TypeScript：通过。
 - ESLint：通过。
