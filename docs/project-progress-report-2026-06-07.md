@@ -1,5 +1,8 @@
 # AI Wallpaper Studio 项目进展报告
 
+> 历史快照：本文记录 2026-06-07 状态。最新进展请查看
+> [2026-06-12 项目进展报告](project-progress-report-2026-06-12.md)。
+
 报告日期：2026-06-07
 当前分支：`codex/triptych-layout-v1`
 已提交基线：`ea527ad fix(editor): stabilize canvas snapping`

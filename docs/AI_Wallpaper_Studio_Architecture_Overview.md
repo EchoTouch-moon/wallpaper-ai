@@ -953,7 +953,28 @@ flowchart TD
   J --> J5[部署预览]
 ```
 
-## 8.3 说明
+## 8.3 Phase 8 当前实现
+
+真实 AI 阶段采用 Provider 边界，而不是让业务代码直接依赖单一模型服务：
+
+```mermaid
+flowchart LR
+  A[Generate / Refine Request] --> B[LayoutModelProvider]
+  B --> C[OpenAI-compatible Chat Completions]
+  C --> D[AiLayoutPlan]
+  D --> E[Zod Parse]
+  E --> F[Template / Asset / Slot Validation]
+  F --> G[materializeAiLayoutPlan]
+  G --> H[validateLayout]
+  H --> I[Editable Candidate]
+  E -->|失败| J[Mock AI Fallback]
+```
+
+模型只规划注册模板和槽位，不直接返回 Fabric 对象或任意画布几何。默认使用
+`json_object` 以兼容更多服务；支持 Structured Outputs 的服务可切换为
+`json_schema`。
+
+## 8.4 说明
 
 项目开发应该遵循：
 
