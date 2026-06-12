@@ -12,7 +12,7 @@ import type {
 import type { WallpaperRatioId } from "@/types/wallpaper";
 import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 
-interface TemplatePlanInput {
+export interface TemplatePlanInput {
   analyses: ImageAssetAnalysis[];
   canvasSize: CanvasSize;
   ratioId: WallpaperRatioId;
@@ -32,7 +32,7 @@ function usageForRatio(ratioId: WallpaperRatioId) {
   return ratioId === "21:9" ? ("ultrawide" as const) : ("desktop" as const);
 }
 
-function calculateCrop(
+export function calculateCoverCrop(
   analysis: ImageAssetAnalysis,
   slotWidth: number,
   slotHeight: number,
@@ -273,7 +273,7 @@ function createLayoutItem(
     zIndex: slot.zIndex,
     opacity: slot.role === "decorative" ? 0.92 : 1,
     fit: "cover",
-    crop: calculateCrop(analysis, width, height),
+    crop: calculateCoverCrop(analysis, width, height),
     mask: {
       type: slot.shape,
       radius:

@@ -3,6 +3,7 @@ import {
   imageAssetAnalysisSchema,
   wallpaperLayoutSchema,
 } from "../layout/layoutSchema.ts";
+import { aiLayoutOperationSchema } from "./aiPlanSchema.ts";
 
 export const generateLayoutModeSchema = z.enum(["template", "mock-ai", "ai"]);
 
@@ -16,6 +17,7 @@ export const generateLayoutStyleSchema = z.enum([
 
 export const generateLayoutRequestSchema = z
   .object({
+    operation: aiLayoutOperationSchema.default("generate"),
     canvas: z
       .object({
         width: z.number().int().positive(),
@@ -67,4 +69,21 @@ export const generateLayoutRequestSchema = z
       }
       assetIds.add(asset.assetId);
     });
+
+    if (request.operation === "refine") {
+      if (!request.currentLayout) {
+        context.addIssue({
+          code: "custom",
+          message: "Refine requests require the current layout",
+          path: ["currentLayout"],
+        });
+      }
+      if (!request.intent.userPrompt?.trim()) {
+        context.addIssue({
+          code: "custom",
+          message: "Refine requests require a user prompt",
+          path: ["intent", "userPrompt"],
+        });
+      }
+    }
   });
