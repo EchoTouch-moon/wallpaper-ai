@@ -6,6 +6,7 @@ import {
 import { LayoutGenerationError } from "./generationFallback.ts";
 import { generateLayoutRequestSchema } from "./schema.ts";
 import type { GenerateLayoutResponse } from "@/types/generateLayout";
+import type { LayoutModelProvider } from "./provider.ts";
 
 interface GenerateLayoutIssue {
   path: string;
@@ -117,6 +118,7 @@ export function handleGenerateLayoutRequest(
 
 export async function handleGenerateLayoutRequestAsync(
   body: unknown,
+  dependencies: { provider?: LayoutModelProvider } = {},
 ): Promise<GenerateLayoutHandlerResponse> {
   try {
     const unsupportedIssues = findUnsupportedPayloadFields(body);
@@ -135,7 +137,7 @@ export async function handleGenerateLayoutRequestAsync(
     const input = generateLayoutRequestSchema.parse(body);
     return {
       status: 200,
-      body: await generateLayoutsAsync(input),
+      body: await generateLayoutsAsync(input, dependencies),
     };
   } catch (error) {
     return handleGenerateLayoutError(error);

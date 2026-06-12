@@ -24,13 +24,14 @@ export class MockAiLayoutAdapter implements LayoutModelAdapter {
 
 export function createAiFallbackResponse(
   request: GenerateLayoutRequest,
+  reason = "AI mode is not connected yet.",
 ): GenerateLayoutResponse {
   const result = generateMockLayouts(request);
   return {
     ...result,
     source: "fallback",
     warnings: [
-      "AI mode is not connected yet. Returned mock-ai layout candidates instead.",
+      `${reason} Returned mock-ai layout candidates instead.`,
     ],
   };
 }

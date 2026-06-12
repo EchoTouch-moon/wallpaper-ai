@@ -107,7 +107,7 @@ test("generate-layout API returns 422 when AI fallback is disabled", () => {
   assert.match(response.body.error, /fallback is disabled/);
 });
 
-test("generate-layout async API path uses the disabled AI adapter fallback", async () => {
+test("generate-layout async API path falls back when model config is missing", async () => {
   const response = await handleGenerateLayoutRequestAsync({
     ...requestBody,
     intent: { ...requestBody.intent, mode: "ai" },
@@ -115,10 +115,10 @@ test("generate-layout async API path uses the disabled AI adapter fallback", asy
 
   assert.equal(response.status, 200);
   assert.equal(response.body.source, "fallback");
-  assert.ok(response.body.warnings?.[0].includes("disabled"));
+  assert.ok(response.body.warnings?.[0].includes("LLM_API_KEY"));
 });
 
-test("generate-layout async API path returns 422 when disabled AI fallback is disallowed", async () => {
+test("generate-layout async API path returns 422 when config fallback is disallowed", async () => {
   const response = await handleGenerateLayoutRequestAsync({
     ...requestBody,
     intent: { ...requestBody.intent, mode: "ai" },
@@ -127,5 +127,66 @@ test("generate-layout async API path returns 422 when disabled AI fallback is di
 
   assert.equal(response.status, 422);
   assert.equal(response.body.code, "generation_failed");
-  assert.match(response.body.error, /disabled/);
+  assert.match(response.body.error, /LLM_API_KEY/);
+});
+
+test("generate-layout async API materializes an injected provider plan", async () => {
+  const response = await handleGenerateLayoutRequestAsync(
+    {
+      ...requestBody,
+      operation: "generate",
+      intent: { ...requestBody.intent, mode: "ai", count: 1 },
+      options: { candidateCount: 1, allowFallback: false },
+    },
+    {
+      provider: {
+        async generatePlan() {
+          return {
+            candidates: [
+              {
+                id: "provider_candidate",
+                label: "Provider triptych",
+                reason: "The provider selected a registered template.",
+                harmonyScore: 0.91,
+                templateId: "triptych_desktop_equal",
+                assignments: [
+                  { slotId: "left", assetId: "asset_a", crop: null },
+                  { slotId: "center", assetId: "asset_b", crop: null },
+                  { slotId: "right", assetId: "asset_c", crop: null },
+                ],
+                backgroundColor: null,
+              },
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.source, "ai");
+  assert.equal(response.body.candidates[0].id, "provider_candidate");
+});
+
+test("generate-layout validates refine requests before calling the provider", async () => {
+  const response = await handleGenerateLayoutRequestAsync(
+    {
+      ...requestBody,
+      operation: "refine",
+      intent: { ...requestBody.intent, mode: "ai", userPrompt: "Make it calmer" },
+    },
+    {
+      provider: {
+        async generatePlan() {
+          throw new Error("Provider should not be called");
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.code, "invalid_request");
+  assert.ok(
+    response.body.issues.some((issue) => issue.path === "currentLayout"),
+  );
 });
