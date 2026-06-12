@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { generateLayouts } from "@/lib/layout-generation/generateLayouts";
+import { generateMockLayouts } from "@/lib/layout-generation/generateMockLayouts";
 import { useEditorStore } from "@/store/editorStore";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
+  GenerateLayoutSource,
 } from "@/types/generateLayout";
 import type { LayoutCandidate } from "@/types/layout";
 
@@ -22,6 +23,13 @@ const INTENT_LABELS: Record<string, string> = {
   "hero-with-support": "主辅图",
   "balanced-collage": "均衡拼贴",
   "story-strip": "叙事排列",
+};
+
+const SOURCE_LABELS: Record<GenerateLayoutSource, string> = {
+  ai: "模型生成",
+  fallback: "本地回退",
+  "mock-ai": "本地规则",
+  template: "模板",
 };
 
 function getStrategyScore(candidate: LayoutCandidate) {
@@ -65,36 +73,52 @@ function getRecommendationSummary(candidate: LayoutCandidate) {
 
 export function TemplatePreviewBar() {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationMode, setGenerationMode] = useState<"ai" | "local">("ai");
+  const [refinePrompt, setRefinePrompt] = useState("");
   const assets = useEditorStore((state) => state.assets);
   const candidates = useEditorStore((state) => state.candidates);
+  const candidateSource = useEditorStore((state) => state.candidateSource);
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const ratioId = useEditorStore((state) => state.ratioId);
   const compositionIntent = useEditorStore((state) => state.compositionIntent);
+  const currentLayout = useEditorStore((state) => state.currentLayout);
   const setCandidates = useEditorStore((state) => state.setCandidates);
+  const setCandidateSource = useEditorStore(
+    (state) => state.setCandidateSource,
+  );
   const setNotice = useEditorStore((state) => state.setNotice);
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const { applyLayout } = useEditorCommands();
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
 
-  const generate = async () => {
+  const generate = async (operation: "generate" | "refine" = "generate") => {
     if (assets.length < 3 || isGenerating) {
       return;
     }
+    if (operation === "refine" && (!currentLayout || !refinePrompt.trim())) {
+      return;
+    }
+
     const request: GenerateLayoutRequest = {
+      operation,
       canvas: {
         width: canvasSize.width,
         height: canvasSize.height,
         ratioId,
       },
       intent: {
-        mode: "mock-ai",
+        mode: generationMode === "ai" ? "ai" : "mock-ai",
         style: "auto",
         compositionIntent,
-        count: 3,
+        count: operation === "refine" ? 1 : 3,
+        userPrompt:
+          operation === "refine" ? refinePrompt.trim() : undefined,
       },
       assets: assets.map((asset) => asset.analysis),
+      currentLayout:
+        operation === "refine" ? (currentLayout ?? undefined) : undefined,
       options: {
-        candidateCount: 3,
+        candidateCount: operation === "refine" ? 1 : 3,
         allowFallback: true,
         strictValidation: true,
       },
@@ -103,7 +127,15 @@ export function TemplatePreviewBar() {
     setIsGenerating(true);
 
     try {
-      try {
+      if (generationMode === "local") {
+        const result = generateMockLayouts(request);
+        if (result.candidates.length === 0) {
+          throw new Error("Local rules returned no candidates");
+        }
+        setCandidates(result.candidates);
+        setCandidateSource("mock-ai");
+        setNotice("已使用本地规则生成排版候选");
+      } else {
         const response = await fetch("/api/generate-layout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -111,7 +143,10 @@ export function TemplatePreviewBar() {
         });
 
         if (!response.ok) {
-          throw new Error("Layout API request failed");
+          const failure = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(failure?.error ?? "Layout API request failed");
         }
 
         const result = (await response.json()) as GenerateLayoutResponse;
@@ -121,20 +156,23 @@ export function TemplatePreviewBar() {
         }
 
         setCandidates(result.candidates);
-        setNotice(result.warnings?.[0] ?? "已生成智能排版候选");
-        return;
-      } catch {
-        const fallback = generateLayouts(request);
-
-        if (fallback.candidates.length === 0) {
-          throw new Error("Local fallback returned no candidates");
+        setCandidateSource(result.source);
+        setNotice(
+          result.warnings?.[0] ??
+            (operation === "refine"
+              ? "已生成布局修改候选"
+              : "已生成 AI 排版候选"),
+        );
+        if (operation === "refine") {
+          setRefinePrompt("");
         }
-
-        setCandidates(fallback.candidates);
-        setNotice(fallback.warnings?.[0] ?? "已使用本地 Mock AI 生成候选");
       }
-    } catch {
-      setNotice("暂时无法生成排版，请检查图片分析结果后重试");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `排版生成失败：${error.message}`
+          : "排版生成失败，请稍后重试",
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -161,14 +199,72 @@ export function TemplatePreviewBar() {
         </button>
       </div>
 
+      <div className="mb-4 grid grid-cols-2 rounded-lg bg-gray-100 p-1">
+        <button
+          type="button"
+          className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${
+            generationMode === "ai"
+              ? "bg-white text-gray-950 shadow-sm"
+              : "text-gray-500 hover:text-gray-900"
+          }`}
+          aria-pressed={generationMode === "ai"}
+          onClick={() => setGenerationMode("ai")}
+        >
+          AI 排版
+        </button>
+        <button
+          type="button"
+          className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${
+            generationMode === "local"
+              ? "bg-white text-gray-950 shadow-sm"
+              : "text-gray-500 hover:text-gray-900"
+          }`}
+          aria-pressed={generationMode === "local"}
+          onClick={() => setGenerationMode("local")}
+        >
+          本地规则
+        </button>
+      </div>
+
       <button 
         className="btn-primary w-full py-2 text-xs font-semibold rounded-lg transition-colors mb-5 shadow-sm shrink-0"
         type="button" 
         disabled={assets.length < 3 || isGenerating} 
-        onClick={generate}
+        onClick={() => void generate("generate")}
       >
-        {isGenerating ? "正在生成排版..." : "生成智能排版模板"}
+        {isGenerating
+          ? "正在生成排版..."
+          : generationMode === "ai"
+            ? "生成 AI 排版"
+            : "生成本地排版"}
       </button>
+
+      {generationMode === "ai" && currentLayout ? (
+        <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <label
+            className="mb-2 block text-[11px] font-semibold text-gray-700"
+            htmlFor="layout-refine-prompt"
+          >
+            修改当前布局
+          </label>
+          <textarea
+            id="layout-refine-prompt"
+            className="min-h-20 w-full resize-none rounded-lg border border-gray-200 bg-white p-2 text-xs leading-5 text-gray-800 outline-none transition focus:border-gray-500"
+            placeholder="例如：让主图更突出，并保留顶部留白"
+            maxLength={1200}
+            value={refinePrompt}
+            onChange={(event) => setRefinePrompt(event.target.value)}
+          />
+          <button
+            type="button"
+            className="mt-2 w-full rounded-lg border border-gray-900 bg-white py-2 text-xs font-semibold text-gray-900 transition hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!refinePrompt.trim() || isGenerating}
+            onClick={() => void generate("refine")}
+          >
+            生成修改候选
+          </button>
+        </div>
+      ) : null}
       
       {candidates.length > 0 ? (
         <div className="flex flex-col gap-4 overflow-y-auto pr-1">
@@ -228,6 +324,11 @@ export function TemplatePreviewBar() {
                     </span>
                   ) : null}
                 </div>
+                {candidateSource ? (
+                  <span className="w-fit rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                    {SOURCE_LABELS[candidateSource]}
+                  </span>
+                ) : null}
                 <p className="text-[11px] leading-4 text-gray-500">
                   {getRecommendationSummary(candidate)}
                 </p>

@@ -19,6 +19,7 @@ import type {
   WallpaperLayout,
 } from "@/types/layout";
 import type { WallpaperRatioId } from "@/types/wallpaper";
+import type { GenerateLayoutSource } from "@/types/generateLayout";
 
 interface EditorState {
   ratioId: WallpaperRatioId;
@@ -39,6 +40,7 @@ interface EditorState {
   isInspectorOpen: boolean;
   compositionIntent: CompositionIntent;
   candidates: LayoutCandidate[];
+  candidateSource: GenerateLayoutSource | null;
   currentLayout: WallpaperLayout | null;
   historyPast: Array<WallpaperLayout | null>;
   historyFuture: Array<WallpaperLayout | null>;
@@ -67,6 +69,7 @@ interface EditorState {
   toggleFocusMode: () => void;
   setCompositionIntent: (intent: CompositionIntent) => void;
   setCandidates: (candidates: LayoutCandidate[]) => void;
+  setCandidateSource: (source: GenerateLayoutSource | null) => void;
   commitLayout: (layout: WallpaperLayout, addToHistory?: boolean) => void;
   undoLayout: () => WallpaperLayout | null | undefined;
   redoLayout: () => WallpaperLayout | null | undefined;
@@ -101,6 +104,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   isInspectorOpen: true,
   compositionIntent: "hero-with-support",
   candidates: [],
+  candidateSource: null,
   currentLayout: null,
   historyPast: [],
   historyFuture: [],
@@ -118,16 +122,21 @@ export const useEditorStore = create<EditorState>((set) => ({
       exportStatus: "idle",
       exportError: null,
       candidates: [],
+      candidateSource: null,
     });
   },
   addAssets: (assets) => set((state) => ({ assets: [...state.assets, ...assets] })),
   removeAsset: (assetId) =>
-    set((state) => ({
-      assets: state.assets.filter((asset) => asset.id !== assetId),
-      candidates: state.candidates.filter((candidate) =>
+    set((state) => {
+      const candidates = state.candidates.filter((candidate) =>
         candidate.layout.items.every((item) => item.assetId !== assetId),
-      ),
-    })),
+      );
+      return {
+        assets: state.assets.filter((asset) => asset.id !== assetId),
+        candidates,
+        candidateSource: candidates.length > 0 ? state.candidateSource : null,
+      };
+    }),
   setCanvasSnapshot: ({ objectCount, selectedObject, hasBackdrop }) =>
     set({
       objectCount,
@@ -155,6 +164,7 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
   setCompositionIntent: (compositionIntent) => set({ compositionIntent }),
   setCandidates: (candidates) => set({ candidates }),
+  setCandidateSource: (candidateSource) => set({ candidateSource }),
   commitLayout: (layout, addToHistory = true) =>
     set((state) => {
       if (!addToHistory) {
@@ -219,6 +229,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       canvasSize: { width: ratio.width, height: ratio.height },
       assets,
       candidates: project.candidates,
+      candidateSource: project.candidates.length > 0 ? "template" : null,
       currentLayout: project.currentLayout,
       historyPast: [],
       historyFuture: [],
@@ -239,6 +250,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       exportStatus: "idle",
       exportError: null,
       candidates: [],
+      candidateSource: null,
       currentLayout: null,
       historyPast: [],
       historyFuture: [],
