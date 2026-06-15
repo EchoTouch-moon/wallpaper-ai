@@ -1,18 +1,19 @@
-# Lesson 1: State and Request Validation
+# 第一课：状态与请求校验
 
-## Goal
+## 学习目标
 
-Build the smallest useful part of the future layout graph:
+实现未来布局 Graph 中最小但有实际意义的一段：
 
 ```text
-input request -> validate_request node -> validated request or validation errors
+输入请求 → validate_request 节点 → 合法请求或校验错误
 ```
 
-Do not compile a `StateGraph` or call a model in this lesson.
+这一课不要编译 `StateGraph`，也不要调用模型。先理解 State 和 Node 之间
+如何传递数据。
 
-## Your implementation
+## 你的任务
 
-Create these files:
+创建以下文件：
 
 ```text
 src/layout_orchestrator/graph/state.py
@@ -20,49 +21,49 @@ src/layout_orchestrator/graph/nodes.py
 tests/test_validate_request.py
 ```
 
-### 1. Define the state
+### 1. 定义 State
 
-Create a `LayoutGraphState` using `TypedDict` with optional fields:
+使用 `TypedDict` 定义 `LayoutGraphState`，包含以下可选字段：
 
 - `request: dict[str, object]`
 - `validated_request: dict[str, object]`
 - `validation_errors: list[str]`
 
-Think about why graph state fields are optional while the graph is running.
+编码前先思考：为什么 Graph 执行过程中，不是每个 State 字段都必须存在？
 
-### 2. Write `validate_request`
+### 2. 实现 `validate_request`
 
-The node receives `LayoutGraphState` and returns a partial state update.
+节点接收 `LayoutGraphState`，返回一个局部 State 更新。
 
-For this first exercise, a valid request must:
+本练习中，合法请求必须满足：
 
-- contain a `canvas` dictionary;
-- contain an `assets` list with at least three entries;
-- contain an `intent` dictionary.
+- `canvas` 是字典；
+- `assets` 是列表且至少包含三个元素；
+- `intent` 是字典。
 
-On success:
+校验成功时：
 
-- return `validated_request`;
-- return an empty `validation_errors` list.
+- 返回 `validated_request`；
+- 返回空的 `validation_errors`。
 
-On failure:
+校验失败时：
 
-- do not raise an exception;
-- return one readable error string for every missing or invalid field;
-- do not return `validated_request`.
+- 不抛出异常；
+- 每个缺失或非法字段返回一条清晰的错误信息；
+- 不返回 `validated_request`。
 
-The node must not mutate the input state.
+节点不得修改传入的原始 State。
 
-### 3. Write tests
+### 3. 编写测试
 
-Add at least:
+至少覆盖：
 
-- one valid request test;
-- one request missing `canvas` test;
-- one request with fewer than three assets test;
-- one test proving the original state was not mutated.
+- 一个合法请求；
+- 缺少 `canvas`；
+- `assets` 少于三个；
+- 证明原始 State 没有被修改。
 
-## Completion checks
+## 完成检查
 
 ```bash
 uv run pytest
@@ -70,13 +71,13 @@ uv run ruff check .
 uv run mypy
 ```
 
-When they pass, ask Codex for review before creating the lesson commit.
+全部通过后，先不要提交。告诉 Codex“第一课写完了”，进入代码审查和复盘。
 
-## Review questions
+## 复盘问题
 
-Be ready to explain:
+准备解释：
 
-1. Which fields does the node read?
-2. Which fields does it write?
-3. Why are validation failures stored in state instead of raised?
-4. Why should a node return a partial update?
+1. 节点读取了哪些 State 字段？
+2. 节点写回了哪些字段？
+3. 为什么校验失败进入 State，而不是直接抛异常？
+4. 为什么节点只返回局部更新，而不是完整 State？

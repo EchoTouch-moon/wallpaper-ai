@@ -1,16 +1,16 @@
-# Layout Orchestrator Learning Service
+# Layout Orchestrator 学习服务
 
-This directory is an isolated Python 3.12 workspace for learning LangGraph
-before the production orchestration migration begins.
+这里是一个独立的 Python 3.12 工作区，用于在正式迁移布局编排服务之前，
+循序渐进地学习 LangGraph。
 
-## Setup
+## 环境初始化
 
 ```bash
 cd services/layout-orchestrator
 uv sync
 ```
 
-Commands do not require manual virtual environment activation:
+日常命令不需要手动激活虚拟环境：
 
 ```bash
 uv run pytest
@@ -18,12 +18,16 @@ uv run ruff check .
 uv run mypy
 ```
 
-## Learning boundary
+## 学习边界
 
-The scaffold intentionally contains no application graph. Lesson 1 asks you
-to define the graph state and one request-validation node yourself. FastAPI,
-model calls, retries, persistence, and the Next.js integration remain out of
-scope until the foundations are understood.
+脚手架刻意没有实现应用 Graph。第一课由你亲自定义 Graph State，并实现一个
+请求校验节点。掌握这些基础之前，暂不加入 FastAPI、模型调用、重试、持久化
+和 Next.js 集成。
 
-Read [Lesson 1](LESSON_01.md) before adding files under
-`src/layout_orchestrator/graph`.
+开始编码前请依次阅读：
+
+1. [第一课：状态与请求校验](LESSON_01.md)
+2. [学习资料与阅读顺序](LEARNING_RESOURCES.md)
+
+后续课程、任务说明、代码审查和复盘统一使用中文；Python 标识符和 Git
+提交信息保留英文。
