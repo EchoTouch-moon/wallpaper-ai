@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field
 
+from layout_orchestrator.checkpoint import create_sqlite_checkpointer
 from layout_orchestrator.contracts import LayoutPlanCandidate, LayoutPlanResponse
 from layout_orchestrator.graph.state import LayoutGraphState
 from layout_orchestrator.graph.workflow import build_layout_graph
@@ -66,9 +67,14 @@ def _plan_from_state(state: LayoutGraphState) -> LayoutPlanResponse:
     return plan
 
 
-def create_app(graph: LayoutGraph | None = None) -> FastAPI:
+def create_app(
+    graph: LayoutGraph | None = None,
+    checkpoint_path: str = ":memory:",
+) -> FastAPI:
     app = FastAPI(title="Wallpaper Layout Orchestrator", version="0.1.0")
-    app.state.layout_graph = graph or build_layout_graph()
+    app.state.layout_graph = graph or build_layout_graph(
+        checkpointer=create_sqlite_checkpointer(checkpoint_path),
+    )
 
     @app.get("/healthz")
     def health() -> dict[str, str]:
@@ -141,4 +147,4 @@ def create_app(graph: LayoutGraph | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+app = create_app(checkpoint_path=".local/layout-checkpoints.sqlite3")
