@@ -40,6 +40,102 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Minimal editorial editor: an intentionally quiet proofing desk. */
+.minimal-editor {
+  --paper: #f1efe8;
+  --paper-bright: #faf8f2;
+  --ink: #171716;
+  --ink-muted: #706f69;
+  --rule: #d7d3ca;
+  --signal: #df4c32;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+}
+
+.minimal-editor::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.3;
+  background-image: linear-gradient(rgba(23, 23, 22, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(23, 23, 22, 0.025) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.editor-workspace,
+.editor-toolbar { position: relative; z-index: 1; }
+
+.editor-toolbar {
+  border-bottom: 1px solid var(--ink);
+  color: var(--paper-bright);
+  background: var(--ink);
+}
+
+.editor-mark { border: 1px solid var(--paper-bright); background: var(--signal); }
+.editor-mark > div { background: var(--paper-bright); }
+.editor-title { font-family: "Iowan Old Style", "Palatino Linotype", ui-serif, serif; letter-spacing: -0.04em; }
+.editor-layout-status { border: 1px solid rgba(250, 248, 242, 0.35); color: var(--paper-bright); background: rgba(250, 248, 242, 0.08); }
+.editor-layout-status > span { background: var(--signal); }
+.editor-command-group, .editor-ratio-control { border: 1px solid rgba(250, 248, 242, 0.24); background: rgba(250, 248, 242, 0.08); color: var(--paper-bright); }
+.editor-divider { background: rgba(250, 248, 242, 0.25); }
+.editor-toolbar button { color: var(--paper-bright); }
+.editor-toolbar button:hover:not(:disabled) { background: rgba(250, 248, 242, 0.15); }
+.editor-toolbar .icon-btn-active { color: var(--ink); background: var(--paper-bright); }
+.editor-toolbar select { color: var(--paper-bright); }
+.editor-toolbar option { color: var(--ink); }
+.editor-export { color: var(--paper-bright); background: var(--signal); border: 1px solid var(--signal); }
+.editor-export:hover:not(:disabled) { color: var(--paper-bright); background: #bd3b27; }
+
+.editor-rail { border-right: 1px solid var(--rule); color: var(--ink-muted); background: rgba(250, 248, 242, 0.72); }
+.editor-rail button { border-radius: 2px; }
+.editor-rail button[title="素材"], .editor-rail button[title="排版"], .editor-rail button[title="参数"] { border-left: 2px solid transparent; }
+.editor-rail button.bg-white { border-color: var(--signal); color: var(--ink); background: var(--paper-bright); box-shadow: none; }
+.editor-sidecar { border-color: var(--rule); background: var(--paper-bright); }
+.editor-sidecar-left { border-right: 1px solid var(--rule); }
+.editor-sidecar-right { border-left: 1px solid var(--rule); }
+.editor-sidecar aside { background: transparent; border: 0; }
+.editor-sidecar h2 { font-family: "Iowan Old Style", "Palatino Linotype", ui-serif, serif; font-size: 18px; letter-spacing: -0.04em; }
+.editor-sidecar button:focus-visible { outline-color: var(--signal); }
+
+.editor-stage { background: #272624; }
+.canvas-stage-grid { opacity: 0.22; background-image: radial-gradient(rgba(250, 248, 242, 0.48) 0.7px, transparent 0.7px); background-size: 17px 17px; }
+.canvas-paper { border: 1px solid rgba(250, 248, 242, 0.38); background: #fffdf8; box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42), 0 2px 0 rgba(255, 255, 255, 0.35) inset; }
+.canvas-stage kbd { border-color: rgba(250, 248, 242, 0.3); color: var(--paper-bright); background: transparent; box-shadow: none; }
+.canvas-stage > div:last-child { color: rgba(250, 248, 242, 0.65); }
+
+@media (max-width: 900px) {
+  .editor-sidecar-right { display: none; }
+  .editor-rail { width: 52px; }
+}
+
+@media (max-width: 768px) {
+  .editor-toolbar {
+    justify-content: flex-start;
+    gap: 10px;
+    padding-inline: 12px;
+    overflow-x: auto;
+  }
+
+  .editor-toolbar > div { flex: 0 0 auto; }
+  .editor-layout-status,
+  .editor-toolbar > div:nth-child(2) > .editor-command-group,
+  .editor-toolbar > div:nth-child(2) > .editor-divider,
+  .editor-toolbar > div:last-child > button:not(.editor-export) { display: none; }
+  .editor-toolbar > div:last-child { gap: 0; }
+
+  .editor-sidecar-left {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 52px;
+    z-index: 30;
+    width: min(320px, calc(100vw - 52px));
+    box-shadow: 16px 0 32px rgba(23, 23, 22, 0.2);
+  }
+}
+
 
 
 button,
