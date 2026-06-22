@@ -293,6 +293,18 @@ export const editorProjectSchema = z
     assetIds: z.array(z.string()),
     analyses: z.array(imageAssetAnalysisSchema),
     candidates: z.array(layoutCandidateSchema),
+    candidateSource: z
+      .enum(["template", "mock-ai", "ai", "fallback"])
+      .nullable()
+      .optional(),
+    layoutSession: z
+      .object({
+        id: z.string().min(1),
+        status: z.enum(["awaiting_approval", "approved"]),
+        engine: z.literal("langgraph"),
+      })
+      .nullable()
+      .optional(),
     currentLayout: wallpaperLayoutSchema.nullable(),
   })
   .superRefine((project, context) => {

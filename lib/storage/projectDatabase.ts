@@ -113,6 +113,9 @@ export async function loadProjectDraft() {
   const availableAssetIds = new Set(
     storedAssets.flatMap((asset) => (asset ? [asset.id] : [])),
   );
+  const candidates = project.candidates.filter((candidate) =>
+    candidate.layout.items.every((item) => availableAssetIds.has(item.assetId)),
+  );
   const restoredProject = editorProjectSchema.parse({
     ...project,
     assetIds: project.assetIds.filter((assetId) =>
@@ -121,11 +124,12 @@ export async function loadProjectDraft() {
     analyses: project.analyses.filter((analysis) =>
       availableAssetIds.has(analysis.assetId),
     ),
-    candidates: project.candidates.filter((candidate) =>
-      candidate.layout.items.every((item) =>
-        availableAssetIds.has(item.assetId),
-      ),
-    ),
+    candidates,
+    candidateSource: candidates.length > 0 ? project.candidateSource ?? null : null,
+    layoutSession:
+      candidates.length === project.candidates.length
+        ? (project.layoutSession ?? null)
+        : null,
     currentLayout:
       project.currentLayout?.items.every((item) =>
         availableAssetIds.has(item.assetId),

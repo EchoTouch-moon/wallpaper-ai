@@ -1185,6 +1185,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         state.ratioId === previousState.ratioId &&
         state.assets === previousState.assets &&
         state.candidates === previousState.candidates &&
+        state.candidateSource === previousState.candidateSource &&
+        state.layoutSession === previousState.layoutSession &&
         state.currentLayout === previousState.currentLayout
       ) {
         return;
@@ -1198,6 +1200,8 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
             createdAt: projectCreatedAtRef.current,
             assets: latest.assets,
             candidates: latest.candidates,
+            candidateSource: latest.candidateSource,
+            layoutSession: latest.layoutSession,
             currentLayout: latest.currentLayout,
             ratioId: latest.ratioId,
           });
