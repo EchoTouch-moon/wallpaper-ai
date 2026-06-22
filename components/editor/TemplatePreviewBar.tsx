@@ -33,6 +33,8 @@ const SOURCE_LABELS: Record<GenerateLayoutSource, string> = {
   template: "模板",
 };
 
+type LayoutSession = NonNullable<GenerateLayoutResponse["session"]>;
+
 function getStrategyScore(candidate: LayoutCandidate) {
   const note = candidate.layout.notes.find((item) =>
     item.startsWith("Mock AI strategy:"),
@@ -79,6 +81,7 @@ export function TemplatePreviewBar() {
   const assets = useEditorStore((state) => state.assets);
   const candidates = useEditorStore((state) => state.candidates);
   const candidateSource = useEditorStore((state) => state.candidateSource);
+  const layoutSession = useEditorStore((state) => state.layoutSession);
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const ratioId = useEditorStore((state) => state.ratioId);
   const compositionIntent = useEditorStore((state) => state.compositionIntent);
@@ -87,6 +90,7 @@ export function TemplatePreviewBar() {
   const setCandidateSource = useEditorStore(
     (state) => state.setCandidateSource,
   );
+  const setLayoutSession = useEditorStore((state) => state.setLayoutSession);
   const setNotice = useEditorStore((state) => state.setNotice);
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const { applyLayout } = useEditorCommands();
@@ -121,6 +125,7 @@ export function TemplatePreviewBar() {
         }
         setCandidates(result.candidates);
         setCandidateSource("mock-ai");
+        setLayoutSession(null);
         setNotice("已使用本地规则生成排版候选");
       } else {
         const response = await fetch("/api/generate-layout", {
@@ -144,11 +149,14 @@ export function TemplatePreviewBar() {
 
         setCandidates(result.candidates);
         setCandidateSource(result.source);
+        setLayoutSession(result.session ?? null);
         setNotice(
           result.warnings?.[0] ??
             (operation === "refine"
               ? "已生成布局修改候选"
-              : "已生成 AI 排版候选"),
+              : result.session
+                ? "请选择候选并确认应用"
+                : "已生成 AI 排版候选"),
         );
         if (operation === "refine") {
           setRefinePrompt("");
@@ -165,6 +173,52 @@ export function TemplatePreviewBar() {
     }
   };
 
+  const applyCandidate = async (candidate: LayoutCandidate) => {
+    if (!layoutSession || layoutSession.status !== "awaiting_approval") {
+      await applyLayout(candidate.layout);
+      return;
+    }
+    if (isGenerating) {
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const response = await fetch(
+        `/api/layout-sessions/${encodeURIComponent(layoutSession.id)}/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateId: candidate.id }),
+        },
+      );
+      const result = (await response.json().catch(() => null)) as
+        | { candidateId?: string; session?: LayoutSession; error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Layout approval request failed");
+      }
+      if (
+        result?.candidateId !== candidate.id ||
+        result.session?.status !== "approved"
+      ) {
+        throw new Error("Layout approval response did not match the candidate");
+      }
+
+      setLayoutSession(result.session);
+      await applyLayout(candidate.layout);
+      setNotice("已确认并应用 LangGraph 排版方案");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `排版确认失败：${error.message}`
+          : "排版确认失败，请稍后重试",
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <aside className="flex flex-col w-full h-full bg-white overflow-y-auto p-5 shrink-0 border-r border-gray-100 select-none">
       <div className="flex items-center justify-between mb-5">
@@ -172,7 +226,9 @@ export function TemplatePreviewBar() {
           <h2 className="text-sm font-semibold tracking-tight text-gray-900">智能排版</h2>
           <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider font-mono">
             {candidates.length > 0
-              ? "选择排版方向"
+              ? layoutSession?.status === "awaiting_approval"
+                ? "确认后应用排版"
+                : "选择排版方向"
               : `照片已就绪: ${assets.length}/3`}
           </span>
         </div>
@@ -265,8 +321,9 @@ export function TemplatePreviewBar() {
               type="button"
               className="flex flex-col border border-gray-200 rounded-xl p-3 bg-gray-50 hover:bg-white hover:border-gray-950 transition-all cursor-pointer w-full text-left group shadow-sm hover:shadow"
               key={candidate.id}
-              onClick={() => void applyLayout(candidate.layout)}
-              aria-label={`应用排版: ${candidate.label}`}
+              disabled={isGenerating}
+              onClick={() => void applyCandidate(candidate)}
+              aria-label={`${layoutSession?.status === "awaiting_approval" ? "确认并应用" : "应用"}排版: ${candidate.label}`}
               title={candidate.reason}
             >
               {/* Preview Box */}
@@ -314,6 +371,11 @@ export function TemplatePreviewBar() {
                 {candidateSource ? (
                   <span className="w-fit rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                     {SOURCE_LABELS[candidateSource]}
+                  </span>
+                ) : null}
+                {layoutSession?.status === "awaiting_approval" ? (
+                  <span className="w-fit rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                    待服务确认
                   </span>
                 ) : null}
                 <p className="text-[11px] leading-4 text-gray-500">
