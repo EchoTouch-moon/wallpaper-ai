@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+from layout_orchestrator.api import create_app
+
+
+def analysis(asset_id: str) -> dict[str, object]:
+    return {
+        "assetId": asset_id,
+        "width": 1920,
+        "height": 1080,
+        "orientation": "landscape",
+        "aspectRatio": 1920 / 1080,
+        "resolutionScore": 0.8,
+        "dominantColors": ["#456fd6", "#456fd6", "#456fd6"],
+        "averageColor": "#456fd6",
+        "brightness": 0.5,
+        "saturation": 0.5,
+        "contrast": 0.4,
+    }
+
+
+def request() -> dict[str, object]:
+    return {
+        "canvas": {"width": 1920, "height": 1080, "ratioId": "16:9"},
+        "intent": {"mode": "ai", "style": "auto"},
+        "assets": [analysis("asset_a"), analysis("asset_b"), analysis("asset_c")],
+    }
+
+
+def test_health_and_readiness_endpoints() -> None:
+    client = TestClient(create_app())
+
+    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/readyz").json() == {"status": "ready"}
+
+
+def test_session_returns_plan_then_approves_candidate() -> None:
+    client = TestClient(create_app())
+
+    start = client.post("/v1/layout-sessions", json=request())
+
+    assert start.status_code == 200
+    body = start.json()
+    assert body["session"]["status"] == "awaiting_approval"
+    assert body["session"]["engine"] == "langgraph"
+    candidate_id = body["plan"]["candidates"][0]["id"]
+
+    approval = client.post(
+        f"/v1/layout-sessions/{body['session']['id']}/approval",
+        json={"candidateId": candidate_id},
+    )
+
+    assert approval.status_code == 200
+    assert approval.json()["session"]["status"] == "approved"
+    assert approval.json()["candidate"]["id"] == candidate_id
+
+
+def test_session_rejects_invalid_request_before_creating_graph_run() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/layout-sessions",
+        json={"canvas": {}, "intent": {}, "assets": []},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"] == "Invalid generate-layout request"
