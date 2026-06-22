@@ -32,58 +32,54 @@ def request() -> dict[str, object]:
 
 
 def test_health_and_readiness_endpoints() -> None:
-    client = TestClient(create_app())
-
-    assert client.get("/healthz").json() == {"status": "ok"}
-    assert client.get("/readyz").json() == {"status": "ready"}
+    with TestClient(create_app()) as client:
+        assert client.get("/healthz").json() == {"status": "ok"}
+        assert client.get("/readyz").json() == {"status": "ready"}
 
 
 def test_session_returns_plan_then_approves_candidate() -> None:
-    client = TestClient(create_app())
+    with TestClient(create_app()) as client:
+        start = client.post("/v1/layout-sessions", json=request())
 
-    start = client.post("/v1/layout-sessions", json=request())
+        assert start.status_code == 200
+        body = start.json()
+        assert body["session"]["status"] == "awaiting_approval"
+        assert body["session"]["engine"] == "langgraph"
+        candidate_id = body["plan"]["candidates"][0]["id"]
 
-    assert start.status_code == 200
-    body = start.json()
-    assert body["session"]["status"] == "awaiting_approval"
-    assert body["session"]["engine"] == "langgraph"
-    candidate_id = body["plan"]["candidates"][0]["id"]
+        approval = client.post(
+            f"/v1/layout-sessions/{body['session']['id']}/approval",
+            json={"candidateId": candidate_id},
+        )
 
-    approval = client.post(
-        f"/v1/layout-sessions/{body['session']['id']}/approval",
-        json={"candidateId": candidate_id},
-    )
-
-    assert approval.status_code == 200
-    assert approval.json()["session"]["status"] == "approved"
-    assert approval.json()["candidate"]["id"] == candidate_id
+        assert approval.status_code == 200
+        assert approval.json()["session"]["status"] == "approved"
+        assert approval.json()["candidate"]["id"] == candidate_id
 
 
 def test_sqlite_checkpoint_resumes_after_app_restart(tmp_path: Path) -> None:
     checkpoint_path = str(tmp_path / "layout-checkpoints.sqlite3")
-    first_client = TestClient(create_app(checkpoint_path=checkpoint_path))
+    with TestClient(create_app(checkpoint_path=checkpoint_path)) as first_client:
+        start = first_client.post("/v1/layout-sessions", json=request())
+        body = start.json()
+        candidate_id = body["plan"]["candidates"][0]["id"]
 
-    start = first_client.post("/v1/layout-sessions", json=request())
-    body = start.json()
-    candidate_id = body["plan"]["candidates"][0]["id"]
-
-    restarted_client = TestClient(create_app(checkpoint_path=checkpoint_path))
-    approval = restarted_client.post(
-        f"/v1/layout-sessions/{body['session']['id']}/approval",
-        json={"candidateId": candidate_id},
-    )
+    with TestClient(create_app(checkpoint_path=checkpoint_path)) as restarted_client:
+        approval = restarted_client.post(
+            f"/v1/layout-sessions/{body['session']['id']}/approval",
+            json={"candidateId": candidate_id},
+        )
 
     assert approval.status_code == 200
     assert approval.json()["candidate"]["id"] == candidate_id
 
 
 def test_session_rejects_invalid_request_before_creating_graph_run() -> None:
-    client = TestClient(create_app())
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/v1/layout-sessions",
+            json={"canvas": {}, "intent": {}, "assets": []},
+        )
 
-    response = client.post(
-        "/v1/layout-sessions",
-        json={"canvas": {}, "intent": {}, "assets": []},
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"]["error"] == "Invalid generate-layout request"
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "Invalid generate-layout request"

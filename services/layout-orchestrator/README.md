@@ -10,6 +10,32 @@ cd services/layout-orchestrator
 uv sync
 ```
 
+## 运行真实模型服务
+
+服务兼容原项目的 `LLM_*` 变量，也兼容学习环境的
+`DASHSCOPE_API_KEY` 与 `DASHSCOPE_BASE_URL`。未配置模型时会使用
+受限的本地规划器，浏览器 BFF 仍能回退到本地规则。
+
+```bash
+uv run uvicorn layout_orchestrator.api:app --reload --port 8000
+```
+
+然后在 Next.js 环境中设置：
+
+```bash
+LAYOUT_ENGINE=langgraph
+LAYOUT_ORCHESTRATOR_URL=http://127.0.0.1:8000
+```
+
+本地会话默认保存在 SQLite。部署时运行：
+
+```bash
+docker compose -f docker-compose.langgraph.yml up --build
+```
+
+该 compose 配置使用 PostgreSQL LangGraph checkpoint；不要将真实密钥写入
+compose 文件，改由 shell 环境或部署平台的秘密管理注入。
+
 日常命令不需要手动激活虚拟环境：
 
 ```bash
