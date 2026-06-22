@@ -18,18 +18,13 @@ from layout_orchestrator.contracts import (
 )
 from layout_orchestrator.graph.nodes import validate_request
 from layout_orchestrator.graph.state import LayoutGraphState
+from layout_orchestrator.templates import TEMPLATE_BY_ID, compatible_templates
 
 
 class LayoutPlanner(Protocol):
     """A model adapter returns only the constrained plan contract."""
 
     def __call__(self, request: LayoutGenerationRequest) -> LayoutPlanResponse: ...
-
-
-def _template_slots(ratio_id: str) -> tuple[str, tuple[str, str, str]]:
-    if ratio_id in {"9:16", "9:19.5"}:
-        return "triptych_mobile_equal", ("top", "middle", "bottom")
-    return "triptych_desktop_equal", ("left", "center", "right")
 
 
 def deterministic_planner(request: LayoutGenerationRequest) -> LayoutPlanResponse:
@@ -39,18 +34,26 @@ def deterministic_planner(request: LayoutGenerationRequest) -> LayoutPlanRespons
     canvas geometry, image bytes, URLs, or frontend-only data.
     """
 
-    template_id, slot_ids = _template_slots(request.canvas.ratio_id)
     asset_ids = [asset.asset_id for asset in request.assets]
+    templates = compatible_templates(request.canvas.ratio_id, request.intent.style)
+    if not templates:
+        templates = compatible_templates(request.canvas.ratio_id, "auto")
     candidates = [
         LayoutPlanCandidate(
             id=f"local_plan_{index + 1}",
-            label=f"Editable triptych {index + 1}",
+            label=f"Editable layout {index + 1}",
             reason="A constrained offline plan keeps every asset reference valid.",
             harmony_score=max(0.5, 0.86 - index * 0.04),
-            template_id=template_id,
+            template_id=templates[index % len(templates)].template_id,
             assignments=[
-                SlotAssignment(slot_id=slot_id, asset_id=asset_ids[position], crop=None)
-                for position, slot_id in enumerate(slot_ids)
+                SlotAssignment(
+                    slot_id=slot_id,
+                    asset_id=asset_ids[position % len(asset_ids)],
+                    crop=None,
+                )
+                for position, slot_id in enumerate(
+                    templates[index % len(templates)].slots
+                )
             ],
             background_color=None,
         )
@@ -74,22 +77,21 @@ def validate_plan(state: LayoutGraphState) -> LayoutGraphState:
         return {"planning_errors": ["Planner returned no layout plan"]}
 
     asset_ids = {asset.asset_id for asset in request.assets}
-    template_id, expected_slots = _template_slots(request.canvas.ratio_id)
     errors: list[str] = []
 
     for candidate in plan.candidates:
-        if candidate.template_id != template_id:
+        template = TEMPLATE_BY_ID.get(candidate.template_id)
+        if template is None or request.canvas.ratio_id not in template.ratios:
             errors.append(f"Unsupported template: {candidate.template_id}")
             continue
         assignments = {
             assignment.slot_id: assignment for assignment in candidate.assignments
         }
-        if set(assignments) != set(expected_slots):
+        if set(assignments) != set(template.slots):
             errors.append(f"Invalid assignments for candidate: {candidate.id}")
             continue
         if any(
-            assignment.asset_id not in asset_ids
-            for assignment in assignments.values()
+            assignment.asset_id not in asset_ids for assignment in assignments.values()
         ):
             errors.append(f"Unknown asset in candidate: {candidate.id}")
 
@@ -132,9 +134,7 @@ def after_plan_check(state: LayoutGraphState) -> Literal["await_approval", "end"
 def build_layout_graph(
     planner: LayoutPlanner = deterministic_planner,
     checkpointer: BaseCheckpointSaver[str] | None = None,
-) -> CompiledStateGraph[
-    LayoutGraphState, None, LayoutGraphState, LayoutGraphState
-]:
+) -> CompiledStateGraph[LayoutGraphState, None, LayoutGraphState, LayoutGraphState]:
     """Compile the workflow with an injectable planner and checkpoint store."""
 
     builder = StateGraph(LayoutGraphState)
@@ -143,17 +143,29 @@ def build_layout_graph(
     builder.add_node("validate_plan", validate_plan)
     builder.add_node("await_approval", await_approval)
     builder.add_edge(START, "validate_request")
-    builder.add_conditional_edges("validate_request", after_validation, {
-        "plan_layout": "plan_layout",
-        "end": END,
-    })
-    builder.add_conditional_edges("plan_layout", after_planning, {
-        "validate_plan": "validate_plan",
-        "end": END,
-    })
-    builder.add_conditional_edges("validate_plan", after_plan_check, {
-        "await_approval": "await_approval",
-        "end": END,
-    })
+    builder.add_conditional_edges(
+        "validate_request",
+        after_validation,
+        {
+            "plan_layout": "plan_layout",
+            "end": END,
+        },
+    )
+    builder.add_conditional_edges(
+        "plan_layout",
+        after_planning,
+        {
+            "validate_plan": "validate_plan",
+            "end": END,
+        },
+    )
+    builder.add_conditional_edges(
+        "validate_plan",
+        after_plan_check,
+        {
+            "await_approval": "await_approval",
+            "end": END,
+        },
+    )
     builder.add_edge("await_approval", END)
     return builder.compile(checkpointer=checkpointer or InMemorySaver())

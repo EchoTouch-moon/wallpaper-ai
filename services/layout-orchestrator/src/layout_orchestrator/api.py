@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from layout_orchestrator.checkpoint import create_sqlite_checkpointer
 from layout_orchestrator.contracts import LayoutPlanCandidate, LayoutPlanResponse
 from layout_orchestrator.graph.state import LayoutGraphState
-from layout_orchestrator.graph.workflow import build_layout_graph
+from layout_orchestrator.graph.workflow import build_layout_graph, deterministic_planner
+from layout_orchestrator.model import create_runtime_planner
 
 LayoutGraph = CompiledStateGraph[
     LayoutGraphState, None, LayoutGraphState, LayoutGraphState
@@ -73,6 +74,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Wallpaper Layout Orchestrator", version="0.1.0")
     app.state.layout_graph = graph or build_layout_graph(
+        planner=create_runtime_planner() or deterministic_planner,
         checkpointer=create_sqlite_checkpointer(checkpoint_path),
     )
 
