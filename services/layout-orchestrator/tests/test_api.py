@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from layout_orchestrator.api import create_app
@@ -54,6 +56,24 @@ def test_session_returns_plan_then_approves_candidate() -> None:
 
     assert approval.status_code == 200
     assert approval.json()["session"]["status"] == "approved"
+    assert approval.json()["candidate"]["id"] == candidate_id
+
+
+def test_sqlite_checkpoint_resumes_after_app_restart(tmp_path: Path) -> None:
+    checkpoint_path = str(tmp_path / "layout-checkpoints.sqlite3")
+    first_client = TestClient(create_app(checkpoint_path=checkpoint_path))
+
+    start = first_client.post("/v1/layout-sessions", json=request())
+    body = start.json()
+    candidate_id = body["plan"]["candidates"][0]["id"]
+
+    restarted_client = TestClient(create_app(checkpoint_path=checkpoint_path))
+    approval = restarted_client.post(
+        f"/v1/layout-sessions/{body['session']['id']}/approval",
+        json={"candidateId": candidate_id},
+    )
+
+    assert approval.status_code == 200
     assert approval.json()["candidate"]["id"] == candidate_id
 
 
