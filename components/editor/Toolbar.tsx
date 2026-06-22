@@ -59,17 +59,17 @@ export function Toolbar() {
   const hasSelection = Boolean(selectedObjectId);
 
   return (
-    <header className="w-full h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 z-20 shrink-0 select-none">
+    <header className="editor-toolbar w-full h-14 flex items-center justify-between px-6 z-20 shrink-0 select-none">
       {/* Left side: Logo & Title */}
       <div className="flex items-center gap-3">
-        <div className="w-6 h-6 rounded bg-black flex items-center justify-center">
-          <div className="w-2.5 h-2.5 bg-white rounded-sm" />
+        <div className="editor-mark w-6 h-6 rounded flex items-center justify-center">
+          <div className="w-2.5 h-2.5 rounded-sm" />
         </div>
-        <span className="font-semibold text-sm tracking-tight text-gray-900">AI 壁纸工作室</span>
+        <span className="editor-title font-semibold text-sm tracking-tight">AI 壁纸工作室</span>
 
         {currentLayout && (
-          <span className="ml-2 px-2.5 py-1 text-[10px] font-medium text-blue-600 bg-blue-50/80 border border-blue-100/60 rounded-full flex items-center gap-1.5 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+          <span className="editor-layout-status ml-2 px-2.5 py-1 text-[10px] font-medium rounded-full flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" />
             排版模式：拖动照片可交换位置
           </span>
         )}
@@ -77,7 +77,7 @@ export function Toolbar() {
 
       {/* Middle side: Main Canvas / Edit Operations */}
       <div className="flex items-center gap-2">
-        <div className="flex items-center gap-0.5 bg-gray-50 p-0.5 border border-gray-200 rounded-lg">
+        <div className="editor-command-group flex items-center gap-0.5 p-0.5 rounded-lg">
           <IconButton disabled={!canUndo} onClick={undo} title="撤销">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
           </IconButton>
@@ -86,9 +86,9 @@ export function Toolbar() {
           </IconButton>
         </div>
 
-        <div className="w-px h-5 bg-gray-200 mx-1" />
+        <div className="editor-divider w-px h-5 mx-1" />
 
-        <div className="flex items-center gap-0.5 bg-gray-50 p-0.5 border border-gray-200 rounded-lg">
+        <div className="editor-command-group flex items-center gap-0.5 p-0.5 rounded-lg">
           <IconButton disabled={!hasSelection} onClick={duplicateSelection} title="复制">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
           </IconButton>
@@ -103,9 +103,9 @@ export function Toolbar() {
           </IconButton>
         </div>
 
-        <div className="w-px h-5 bg-gray-200 mx-1" />
+        <div className="editor-divider w-px h-5 mx-1" />
 
-        <label className="flex items-center gap-2 h-9 px-3 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-500 hover:bg-gray-100 hover:border-gray-300 transition-colors cursor-pointer">
+        <label className="editor-ratio-control flex items-center gap-2 h-9 px-3 rounded-lg text-xs font-medium transition-colors cursor-pointer">
           <span className="text-[10px] text-gray-400 uppercase tracking-wider font-mono">比例</span>
           <select
             className="bg-transparent border-none outline-none text-gray-900 cursor-pointer font-semibold text-xs pr-1"
@@ -123,7 +123,7 @@ export function Toolbar() {
 
       {/* Right side: View Toggles & Export */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-0.5 bg-gray-50 p-0.5 border border-gray-200 rounded-lg">
+        <div className="editor-command-group flex items-center gap-0.5 p-0.5 rounded-lg">
           <IconButton active={isAssetPanelOpen} onClick={toggleAssetPanel} title="切换素材库">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z" /></svg>
           </IconButton>
@@ -143,7 +143,7 @@ export function Toolbar() {
         </IconButton>
 
         <button
-          className="btn-primary h-9 px-5 rounded-lg text-xs font-semibold tracking-wide transition-all duration-150 shadow-sm flex items-center gap-1.5 cursor-pointer"
+          className="editor-export h-9 px-5 rounded-lg text-xs font-semibold tracking-wide transition-all duration-150 flex items-center gap-1.5 cursor-pointer"
           disabled={!isCanvasReady || exportStatus === "exporting"}
           onClick={exportPng}
         >
