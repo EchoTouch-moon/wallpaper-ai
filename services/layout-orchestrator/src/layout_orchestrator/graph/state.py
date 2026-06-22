@@ -14,4 +14,5 @@ class LayoutGraphState(TypedDict, total=False):
     validated_request: LayoutGenerationRequest
     validation_errors: list[str]
     plan: LayoutPlanResponse
+    planning_errors: list[str]
     selected_candidate_id: str
