@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wallpaper
+      POSTGRES_USER: wallpaper
+      POSTGRES_PASSWORD: wallpaper
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallpaper -d wallpaper"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - langgraph-postgres:/var/lib/postgresql/data
+
+  orchestrator:
+    build:
+      context: ./services/layout-orchestrator
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      CHECKPOINT_DATABASE_URL: postgresql://wallpaper:wallpaper@postgres:5432/wallpaper?sslmode=disable
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-}
+
+volumes:
+  langgraph-postgres:
