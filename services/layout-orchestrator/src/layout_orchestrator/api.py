@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -10,7 +13,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict, Field
 
-from layout_orchestrator.checkpoint import create_sqlite_checkpointer
+from layout_orchestrator.checkpoint import open_checkpointer
 from layout_orchestrator.contracts import LayoutPlanCandidate, LayoutPlanResponse
 from layout_orchestrator.graph.state import LayoutGraphState
 from layout_orchestrator.graph.workflow import build_layout_graph, deterministic_planner
@@ -72,10 +75,26 @@ def create_app(
     graph: LayoutGraph | None = None,
     checkpoint_path: str = ":memory:",
 ) -> FastAPI:
-    app = FastAPI(title="Wallpaper Layout Orchestrator", version="0.1.0")
-    app.state.layout_graph = graph or build_layout_graph(
-        planner=create_runtime_planner() or deterministic_planner,
-        checkpointer=create_sqlite_checkpointer(checkpoint_path),
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        if graph is not None:
+            application.state.layout_graph = graph
+            yield
+            return
+        resource = open_checkpointer(checkpoint_path)
+        application.state.layout_graph = build_layout_graph(
+            planner=create_runtime_planner() or deterministic_planner,
+            checkpointer=resource.saver,
+        )
+        try:
+            yield
+        finally:
+            resource.close()
+
+    app = FastAPI(
+        title="Wallpaper Layout Orchestrator",
+        version="0.1.0",
+        lifespan=lifespan,
     )
 
     @app.get("/healthz")
@@ -149,4 +168,9 @@ def create_app(
     return app
 
 
-app = create_app(checkpoint_path=".local/layout-checkpoints.sqlite3")
+app = create_app(
+    checkpoint_path=os.getenv(
+        "CHECKPOINT_DATABASE_URL",
+        ".local/layout-checkpoints.sqlite3",
+    )
+)
