@@ -3,6 +3,7 @@ import {
   createInvalidJsonResponse,
   handleGenerateLayoutRequestAsync,
 } from "../../../lib/layout-generation/handleGenerateLayoutRequest.ts";
+import { handleLangGraphGenerateLayoutRequest } from "../../../lib/layout-generation/handleLangGraphGenerateLayoutRequest.ts";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -14,6 +15,9 @@ export async function POST(request: Request) {
     return NextResponse.json(result.body, { status: result.status });
   }
 
-  const result = await handleGenerateLayoutRequestAsync(body);
+  const result =
+    process.env.LAYOUT_ENGINE === "langgraph"
+      ? await handleLangGraphGenerateLayoutRequest(body)
+      : await handleGenerateLayoutRequestAsync(body);
   return NextResponse.json(result.body, { status: result.status });
 }

@@ -58,4 +58,9 @@ export interface GenerateLayoutResponse {
   rejected: RejectedLayoutCandidate[];
   source: GenerateLayoutSource;
   warnings?: string[];
+  session?: {
+    id: string;
+    status: "awaiting_approval" | "approved";
+    engine: "langgraph";
+  };
 }

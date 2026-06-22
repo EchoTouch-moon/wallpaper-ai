@@ -8,7 +8,7 @@ import { generateLayoutRequestSchema } from "./schema.ts";
 import type { GenerateLayoutResponse } from "@/types/generateLayout";
 import type { LayoutModelProvider } from "./provider.ts";
 
-interface GenerateLayoutIssue {
+export interface GenerateLayoutIssue {
   path: string;
   message: string;
 }
@@ -39,7 +39,7 @@ function formatPath(path: Array<string | number>) {
   return path.length > 0 ? path.join(".") : "body";
 }
 
-function findUnsupportedPayloadFields(
+export function findUnsupportedPayloadFields(
   value: unknown,
   path: Array<string | number> = [],
 ): GenerateLayoutIssue[] {
@@ -144,7 +144,9 @@ export async function handleGenerateLayoutRequestAsync(
   }
 }
 
-function handleGenerateLayoutError(error: unknown): GenerateLayoutHandlerResponse {
+export function handleGenerateLayoutError(
+  error: unknown,
+): GenerateLayoutHandlerResponse {
   if (error instanceof ZodError) {
     return {
       status: 400,
