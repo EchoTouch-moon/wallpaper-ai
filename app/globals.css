@@ -110,6 +110,32 @@ body {
   .editor-rail { width: 52px; }
 }
 
+@media (max-width: 768px) {
+  .editor-toolbar {
+    justify-content: flex-start;
+    gap: 10px;
+    padding-inline: 12px;
+    overflow-x: auto;
+  }
+
+  .editor-toolbar > div { flex: 0 0 auto; }
+  .editor-layout-status,
+  .editor-toolbar > div:nth-child(2) > .editor-command-group,
+  .editor-toolbar > div:nth-child(2) > .editor-divider,
+  .editor-toolbar > div:last-child > button:not(.editor-export) { display: none; }
+  .editor-toolbar > div:last-child { gap: 0; }
+
+  .editor-sidecar-left {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 52px;
+    z-index: 30;
+    width: min(320px, calc(100vw - 52px));
+    box-shadow: 16px 0 32px rgba(23, 23, 22, 0.2);
+  }
+}
+
 
 
 button,
