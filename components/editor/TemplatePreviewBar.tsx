@@ -76,6 +76,9 @@ function getRecommendationSummary(candidate: LayoutCandidate) {
 
 export function TemplatePreviewBar() {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [approvingCandidateId, setApprovingCandidateId] = useState<string | null>(
+    null,
+  );
   const [generationMode, setGenerationMode] = useState<"ai" | "local">("ai");
   const [refinePrompt, setRefinePrompt] = useState("");
   const assets = useEditorStore((state) => state.assets);
@@ -95,9 +98,10 @@ export function TemplatePreviewBar() {
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const { applyLayout } = useEditorCommands();
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  const isBusy = isGenerating || approvingCandidateId !== null;
 
   const generate = async (operation: "generate" | "refine" = "generate") => {
-    if (assets.length < 3 || isGenerating) {
+    if (assets.length < 3 || isBusy) {
       return;
     }
     if (operation === "refine" && (!currentLayout || !refinePrompt.trim())) {
@@ -178,11 +182,11 @@ export function TemplatePreviewBar() {
       await applyLayout(candidate.layout);
       return;
     }
-    if (isGenerating) {
+    if (isBusy) {
       return;
     }
 
-    setIsGenerating(true);
+    setApprovingCandidateId(candidate.id);
     try {
       const response = await fetch(
         `/api/layout-sessions/${encodeURIComponent(layoutSession.id)}/approve`,
@@ -215,7 +219,7 @@ export function TemplatePreviewBar() {
           : "排版确认失败，请稍后重试",
       );
     } finally {
-      setIsGenerating(false);
+      setApprovingCandidateId(null);
     }
   };
 
@@ -272,11 +276,13 @@ export function TemplatePreviewBar() {
       <button 
         className="btn-primary w-full py-2 text-xs font-semibold rounded-lg transition-colors mb-5 shadow-sm shrink-0"
         type="button" 
-        disabled={assets.length < 3 || isGenerating} 
+        disabled={assets.length < 3 || isBusy}
         onClick={() => void generate("generate")}
       >
         {isGenerating
           ? "正在生成排版..."
+          : approvingCandidateId
+            ? "正在确认候选..."
           : generationMode === "ai"
             ? "生成 AI 排版"
             : "生成本地排版"}
@@ -301,7 +307,7 @@ export function TemplatePreviewBar() {
           <button
             type="button"
             className="mt-2 w-full rounded-lg border border-gray-900 bg-white py-2 text-xs font-semibold text-gray-900 transition hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!refinePrompt.trim() || isGenerating}
+            disabled={!refinePrompt.trim() || isBusy}
             onClick={() => void generate("refine")}
           >
             生成修改候选
@@ -310,7 +316,10 @@ export function TemplatePreviewBar() {
       ) : null}
       
       {candidates.length > 0 ? (
-        <div className="flex flex-col gap-4 overflow-y-auto pr-1">
+        <div
+          className="flex flex-col gap-4 overflow-y-auto pr-1"
+          aria-busy={approvingCandidateId !== null}
+        >
           {candidates.map((candidate) => {
             const strategyScore = getStrategyScore(candidate);
             const templateType = candidate.layout.template?.type ?? "";
@@ -321,7 +330,7 @@ export function TemplatePreviewBar() {
               type="button"
               className="flex flex-col border border-gray-200 rounded-xl p-3 bg-gray-50 hover:bg-white hover:border-gray-950 transition-all cursor-pointer w-full text-left group shadow-sm hover:shadow"
               key={candidate.id}
-              disabled={isGenerating}
+              disabled={isBusy}
               onClick={() => void applyCandidate(candidate)}
               aria-label={`${layoutSession?.status === "awaiting_approval" ? "确认并应用" : "应用"}排版: ${candidate.label}`}
               title={candidate.reason}
@@ -375,7 +384,9 @@ export function TemplatePreviewBar() {
                 ) : null}
                 {layoutSession?.status === "awaiting_approval" ? (
                   <span className="w-fit rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                    待服务确认
+                    {approvingCandidateId === candidate.id
+                      ? "正在确认…"
+                      : "待服务确认（可恢复）"}
                   </span>
                 ) : null}
                 <p className="text-[11px] leading-4 text-gray-500">
