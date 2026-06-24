@@ -1494,7 +1494,7 @@ input:focus-visible {
   .toolbar-history { display: none; }
   .toolbar-ratio-control { grid-column: 2; grid-row: 1; justify-self: center; }
   .toolbar-actions { grid-column: 3; grid-row: 1; }
-  .toolbar-export { width: 42px; justify-content: center; padding: 0; }
+  .toolbar-export { width: 44px; justify-content: center; padding: 0; }
   .toolbar-export span { display: none; }
   .toolbar-more-trigger { display: grid !important; width: 44px; height: 44px; place-items: center; padding: 0; font-size: 0; }
   .toolbar-more-trigger svg { width: 18px; height: 18px; }
