@@ -1290,19 +1290,6 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       const commandKey = event.metaKey || event.ctrlKey;
       const step = event.shiftKey ? 10 : 1;
 
-      if (event.key === "Tab") {
-        const canToggleFocus =
-          target === document.body ||
-          target instanceof HTMLCanvasElement ||
-          (target instanceof HTMLElement &&
-            Boolean(target.closest(".canvas-stage, .stage-region")));
-        if (canToggleFocus) {
-          event.preventDefault();
-          useEditorStore.getState().toggleFocusMode();
-        }
-        return;
-      }
-
       if (event.key === "Escape") {
         if (cropDragRef.current) {
           finishCrop();

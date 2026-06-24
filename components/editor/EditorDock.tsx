@@ -71,6 +71,7 @@ export function EditorDock({
     <nav
       aria-label={label}
       className={[styles.dock, styles[side], className].filter(Boolean).join(" ")}
+      data-editor-dock="true"
       data-expanded={isExpanded}
       data-side={side}
       onMouseEnter={() => setExpansion(true)}
@@ -81,13 +82,13 @@ export function EditorDock({
       <div className={styles.toolList}>
         {items.map((item) => {
           const isActive = activeId === undefined ? Boolean(item.active) : item.id === activeId;
-          const panelId = item.controls ?? (isActive ? controls : undefined);
+          const panelId = isActive ? item.controls ?? controls : undefined;
 
           return (
             <button
               aria-controls={panelId}
-              aria-current={isActive ? "page" : undefined}
-              aria-expanded={panelId ? isActive && isExpanded : undefined}
+              aria-expanded={panelId ? isActive : undefined}
+              aria-pressed={isActive}
               aria-label={item.label}
               className={styles.tool}
               data-active={isActive || undefined}
