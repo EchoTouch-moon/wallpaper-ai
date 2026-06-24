@@ -39,7 +39,11 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export function PropertyPanel() {
+interface PropertyPanelProps {
+  onClose?: () => void;
+}
+
+export function PropertyPanel({ onClose }: PropertyPanelProps) {
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const previewScale = useEditorStore((state) => state.previewScale);
   const objectCount = useEditorStore((state) => state.objectCount);
@@ -48,7 +52,6 @@ export function PropertyPanel() {
   const setCompositionIntent = useEditorStore((state) => state.setCompositionIntent);
   const hasBackdrop = useEditorStore((state) => state.hasBackdrop);
   const cropSession = useEditorStore((state) => state.cropSession);
-  const toggleInspector = useEditorStore((state) => state.toggleInspector);
   const currentLayout = useEditorStore((state) => state.currentLayout);
   
   const {
@@ -72,9 +75,10 @@ export function PropertyPanel() {
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-sm font-semibold tracking-tight text-gray-900">参数面板</h2>
         <button 
-          onClick={toggleInspector}
-          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors cursor-pointer"
-          title="关闭面板"
+          onClick={onClose}
+          className="drawer-close-control"
+          aria-label="关闭检查器"
+          title="关闭检查器"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>

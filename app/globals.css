@@ -1360,3 +1360,152 @@ input:focus-visible {
   background-color: #f3f4f6 !important;
   color: #111111 !important;
 }
+
+/* Canvas-first editor v2: controls recede until the user asks for them. */
+.canvas-first-editor {
+  --studio-ink: #171816;
+  --studio-ash: #242623;
+  --studio-paper: #f8f6ef;
+  --studio-soft: #e9e4d9;
+  --studio-line: rgba(248, 246, 239, 0.14);
+  --studio-muted: #a7a79f;
+  --studio-signal: #e15b38;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  color: var(--studio-paper);
+  background: var(--studio-ash);
+  font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+  isolation: isolate;
+}
+
+.canvas-first-editor::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  opacity: 0.22;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.26) 0.6px, transparent 0.8px);
+  background-size: 18px 18px;
+}
+
+.canvas-toolbar {
+  position: relative;
+  z-index: 40;
+  display: grid;
+  width: 100%;
+  min-height: 64px;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--studio-line);
+  background: rgba(23, 24, 22, 0.88);
+  backdrop-filter: blur(20px);
+}
+
+.toolbar-brand,
+.toolbar-actions,
+.toolbar-history,
+.toolbar-ratio-control,
+.toolbar-export,
+.toolbar-more-trigger { display: flex; align-items: center; }
+
+.canvas-toolbar .toolbar-brand,
+.canvas-toolbar .toolbar-actions {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.toolbar-brand { gap: 10px; min-width: 0; }
+.toolbar-brand strong { display: block; color: var(--studio-paper); font-family: "Iowan Old Style", "Baskerville", serif; font-size: 15px; font-weight: 600; letter-spacing: -0.03em; }
+.toolbar-brand span { display: block; margin-top: 1px; color: var(--studio-muted); font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; }
+.toolbar-mark { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid rgba(248, 246, 239, 0.7); border-radius: 7px 2px 7px 2px; background: var(--studio-signal); transform: rotate(-4deg); }
+.toolbar-mark i { width: 9px; height: 9px; border: 1px solid var(--studio-paper); border-radius: 2px; }
+
+.toolbar-ratio-control { justify-self: center; gap: 9px; padding: 6px 10px; border: 1px solid var(--studio-line); border-radius: 6px; color: var(--studio-muted); background: rgba(255, 255, 255, 0.045); }
+.toolbar-ratio-control > span { font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+.toolbar-ratio-control select { max-width: 150px; border: 0; outline: 0; color: var(--studio-paper); background: transparent; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 11px; font-weight: 650; }
+.toolbar-ratio-control option { color: var(--studio-ink); }
+
+.toolbar-actions { justify-self: end; gap: 8px; }
+.toolbar-history { gap: 2px; padding: 2px; border: 1px solid var(--studio-line); border-radius: 7px; background: rgba(255, 255, 255, 0.04); }
+.toolbar-icon { display: grid; width: 44px; height: 44px; place-items: center; border: 0; border-radius: 5px; color: var(--studio-paper); background: transparent; cursor: pointer; }
+.toolbar-icon svg { width: 18px; height: 18px; }
+.toolbar-icon:hover:not(:disabled), .toolbar-icon:focus-visible { color: var(--studio-ink); background: var(--studio-paper); }
+.toolbar-icon:disabled { cursor: not-allowed; opacity: 0.27; }
+.toolbar-icon:focus-visible, .toolbar-more-trigger:focus-visible, .toolbar-export:focus-visible { outline: 2px solid var(--studio-signal); outline-offset: 2px; }
+
+.toolbar-more-wrap { position: relative; }
+.toolbar-more-trigger { min-height: 44px; gap: 5px; padding: 0 9px; border: 1px solid transparent; border-radius: 5px; color: var(--studio-paper); background: transparent; cursor: pointer; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 11px; }
+.toolbar-more-trigger:hover { border-color: var(--studio-line); background: rgba(255, 255, 255, 0.06); }
+.toolbar-more-trigger svg { width: 14px; height: 14px; }
+.toolbar-more-menu { position: absolute; top: calc(100% + 10px); right: 0; display: grid; width: 226px; gap: 3px; padding: 8px; border: 1px solid rgba(23, 24, 22, 0.16); border-radius: 9px; color: var(--studio-ink); background: var(--studio-paper); box-shadow: 0 18px 42px rgba(0, 0, 0, 0.25); animation: menu-in 150ms ease-out both; }
+.toolbar-more-menu button { display: flex; width: 100%; min-height: 38px; align-items: center; justify-content: space-between; padding: 0 8px; border: 0; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; font-size: 12px; text-align: left; }
+.toolbar-more-menu button:hover, .toolbar-more-menu button:focus-visible { background: #ebe7dd; outline: none; }
+.toolbar-more-menu small, .toolbar-more-menu kbd { color: #77736a; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 9px; }
+.toolbar-menu-label { padding: 7px 8px 3px; color: #8a867d; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.toolbar-menu-danger { color: #aa3f2a !important; }
+.toolbar-export { min-height: 44px; gap: 7px; padding: 0 13px; border: 1px solid var(--studio-signal); border-radius: 6px; color: white; background: var(--studio-signal); cursor: pointer; font-size: 12px; font-weight: 700; }
+.toolbar-export svg { width: 16px; height: 16px; }
+.toolbar-export:hover:not(:disabled) { border-color: #f07857; background: #c64b2e; }
+.toolbar-export:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.canvas-workspace { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.canvas-workspace.drawer-open-left .canvas-stage { left: min(390px, 34vw); }
+.canvas-workspace.drawer-open-right .canvas-stage { right: min(390px, 34vw); }
+.canvas-workspace .canvas-stage { background: radial-gradient(circle at 50% 42%, #3d403c 0%, #282a28 50%, #20211f 100%); }
+.canvas-workspace .canvas-stage-grid { opacity: 0.18; background-image: radial-gradient(rgba(248, 246, 239, 0.5) 0.65px, transparent 0.8px); background-size: 18px 18px; }
+.canvas-workspace .canvas-paper { border-color: rgba(255, 255, 255, 0.42); background: #fffdf8; box-shadow: 0 32px 90px rgba(0, 0, 0, 0.43), 0 1px 0 rgba(255, 255, 255, 0.58) inset; }
+.workspace-dock { z-index: 30 !important; }
+
+.workspace-drawer { position: absolute; top: 18px; bottom: 18px; z-index: 35; width: min(360px, calc(100% - 148px)); overflow: hidden; border: 1px solid rgba(248, 246, 239, 0.25); border-radius: 10px; background: rgba(248, 246, 239, 0.97); box-shadow: 0 28px 68px rgba(0, 0, 0, 0.3); backdrop-filter: blur(22px); animation: drawer-in 190ms cubic-bezier(0.2, 0.75, 0.2, 1) both; }
+.workspace-drawer[aria-hidden="true"] { visibility: hidden; pointer-events: none; opacity: 0; }
+.workspace-drawer-left { left: 90px; transform-origin: left center; }
+.workspace-drawer-right { right: 90px; transform-origin: right center; }
+.workspace-drawer > aside { height: 100%; border: 0; background: transparent; }
+.workspace-drawer h2 { font-family: "Iowan Old Style", "Baskerville", serif; font-size: 18px; font-weight: 600; letter-spacing: -0.04em; }
+.drawer-close-control { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid #ded8cb; border-radius: 7px; color: #5d5b54; background: transparent; cursor: pointer; }
+.drawer-close-control:hover, .drawer-close-control:focus-visible { border-color: var(--studio-signal); color: var(--studio-signal); outline: none; }
+
+.canvas-shortcuts { position: absolute; right: 20px; bottom: 18px; z-index: 15; color: rgba(248, 246, 239, 0.72); font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 10px; }
+.canvas-shortcuts summary { display: inline-flex; min-height: 32px; align-items: center; padding: 0 10px; border: 1px solid rgba(248, 246, 239, 0.23); border-radius: 5px; cursor: pointer; list-style: none; background: rgba(23, 24, 22, 0.36); }
+.canvas-shortcuts summary::-webkit-details-marker { display: none; }
+.canvas-shortcuts > div { position: absolute; right: 0; bottom: 40px; display: grid; width: 168px; gap: 7px; padding: 11px; border: 1px solid rgba(248, 246, 239, 0.18); border-radius: 7px; color: #e8e4db; background: rgba(23, 24, 22, 0.88); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.23); }
+.canvas-shortcuts span { display: flex; gap: 8px; align-items: center; }
+.canvas-shortcuts kbd { padding: 2px 4px; border: 1px solid rgba(248, 246, 239, 0.25); border-radius: 3px; font: inherit; font-size: 9px; }
+
+.canvas-first-editor button:focus-visible,
+.canvas-first-editor select:focus-visible,
+.canvas-first-editor input:focus-visible { outline: 2px solid var(--studio-signal); outline-offset: 2px; }
+
+@keyframes drawer-in { from { opacity: 0; transform: translateX(-10px) scale(0.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 720px) {
+  .canvas-toolbar { min-height: 58px; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: 1fr; padding: 0 12px; }
+  .toolbar-brand { grid-column: 1; grid-row: 1; }
+  .toolbar-brand > div { display: none; }
+  .toolbar-history { display: none; }
+  .toolbar-ratio-control { grid-column: 2; grid-row: 1; justify-self: center; }
+  .toolbar-actions { grid-column: 3; grid-row: 1; }
+  .toolbar-export { width: 42px; justify-content: center; padding: 0; }
+  .toolbar-export span { display: none; }
+  .toolbar-more-trigger { display: grid !important; width: 44px; height: 44px; place-items: center; padding: 0; font-size: 0; }
+  .toolbar-more-trigger svg { width: 18px; height: 18px; }
+  .toolbar-more-menu { right: -44px; width: min(226px, calc(100vw - 24px)); }
+  .canvas-workspace.drawer-open-left .canvas-stage,
+  .canvas-workspace.drawer-open-right .canvas-stage { right: 0; left: 0; }
+  .workspace-drawer { top: auto; right: 10px; bottom: 72px; left: 10px; width: auto; height: min(68vh, 620px); border-radius: 12px; }
+  .workspace-drawer-left, .workspace-drawer-right { transform-origin: bottom center; }
+  .canvas-shortcuts { right: 12px; bottom: 70px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-drawer, .toolbar-more-menu { animation: none; }
+}

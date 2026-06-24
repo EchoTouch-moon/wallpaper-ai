@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+export { CanvasFirstWorkspace as EditorWorkspace } from "@/components/editor/CanvasFirstWorkspace";
 import { AssetPanel } from "@/components/editor/AssetPanel";
 import { CanvasStage } from "@/components/editor/CanvasStage";
 import { PropertyPanel } from "@/components/editor/PropertyPanel";
@@ -8,7 +9,7 @@ import { Toolbar } from "@/components/editor/Toolbar";
 import { TemplatePreviewBar } from "@/components/editor/TemplatePreviewBar";
 import { useEditorStore } from "@/store/editorStore";
 
-export function EditorWorkspace() {
+export function LegacyEditorWorkspace() {
   const isAssetPanelOpen = useEditorStore((state) => state.isAssetPanelOpen);
   const isInspectorOpen = useEditorStore((state) => state.isInspectorOpen);
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
