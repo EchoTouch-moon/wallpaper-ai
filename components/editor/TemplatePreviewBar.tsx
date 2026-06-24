@@ -74,7 +74,11 @@ function getRecommendationSummary(candidate: LayoutCandidate) {
   return candidate.reason;
 }
 
-export function TemplatePreviewBar() {
+interface TemplatePreviewBarProps {
+  onClose?: () => void;
+}
+
+export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [approvingCandidateId, setApprovingCandidateId] = useState<string | null>(
     null,
@@ -95,7 +99,6 @@ export function TemplatePreviewBar() {
   );
   const setLayoutSession = useEditorStore((state) => state.setLayoutSession);
   const setNotice = useEditorStore((state) => state.setNotice);
-  const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const { applyLayout } = useEditorCommands();
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
   const isBusy = isGenerating || approvingCandidateId !== null;
@@ -237,10 +240,10 @@ export function TemplatePreviewBar() {
           </span>
         </div>
         <button 
-          onClick={toggleAssetPanel}
-          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors cursor-pointer"
+          onClick={onClose}
+          className="drawer-close-control"
           aria-label="关闭智能排版面板"
-          title="关闭面板"
+          title="关闭智能排版面板"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>

@@ -6,13 +6,16 @@ import { createImageAsset } from "@/lib/image/extractMetadata";
 import { saveAssetBlob } from "@/lib/storage/projectDatabase";
 import { useEditorStore } from "@/store/editorStore";
 
-export function AssetPanel() {
+interface AssetPanelProps {
+  onClose?: () => void;
+}
+
+export function AssetPanel({ onClose }: AssetPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const assets = useEditorStore((state) => state.assets);
   const addAssets = useEditorStore((state) => state.addAssets);
   const setNotice = useEditorStore((state) => state.setNotice);
-  const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const { addImage, removeAsset } = useEditorCommands();
 
   const processFiles = async (files: FileList | File[]) => {
@@ -69,9 +72,10 @@ export function AssetPanel() {
           <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider font-mono">{assets.length} 个项目</span>
         </div>
         <button 
-          onClick={toggleAssetPanel}
-          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors cursor-pointer"
-          title="关闭面板"
+          onClick={onClose}
+          className="drawer-close-control"
+          aria-label="关闭素材面板"
+          title="关闭素材面板"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
