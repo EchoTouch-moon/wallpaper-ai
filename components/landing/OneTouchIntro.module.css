@@ -1,0 +1,215 @@
+.overlay {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  overflow: hidden;
+  color: var(--one-touch-silver);
+  background: var(--one-touch-bg);
+  isolation: isolate;
+  touch-action: manipulation;
+}
+
+.panels,
+.panel,
+.viewportSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.panels {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.panel {
+  background: var(--one-touch-bg);
+  will-change: transform;
+}
+
+.viewportSvg {
+  z-index: 3;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.viewportCut {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+}
+
+.ray {
+  will-change: transform, opacity;
+}
+
+.rayBeam,
+.rayGlow {
+  vector-effect: non-scaling-stroke;
+}
+
+.rayBeam {
+  opacity: 0.98;
+}
+
+.rayGlow {
+  opacity: 0.34;
+  filter: blur(1.8px);
+}
+
+.viewportCut {
+  stroke: rgba(244, 244, 244, 0.9);
+  stroke-width: 0.72;
+  filter: drop-shadow(0 0 2px rgba(232, 232, 232, 0.55));
+}
+
+.geometry {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 214px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  will-change: transform, opacity;
+}
+
+.touchButton {
+  position: relative;
+  display: grid;
+  width: 176px;
+  height: 176px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touchButton:focus {
+  outline: none;
+}
+
+.touchButton:focus-visible .coreSvg {
+  filter: drop-shadow(0 0 5px rgba(244, 244, 244, 0.52));
+}
+
+.coreSvg {
+  width: var(--one-touch-size);
+  height: var(--one-touch-size);
+  overflow: visible;
+}
+
+.outline,
+.innerCut,
+.hoverTracer,
+.pulse {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.outline {
+  fill: rgba(232, 232, 232, 0.025);
+  stroke: var(--one-touch-silver);
+  stroke-width: 1.05;
+  stroke-linejoin: miter;
+}
+
+.innerCut {
+  stroke: rgba(244, 244, 244, 0.78);
+  stroke-width: 0.72;
+}
+
+.hoverTracer {
+  stroke: #ffffff;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+}
+
+.pulse {
+  /* Start hidden (opacity:0) so the circle doesn't flash on the first paint
+     before useGSAP runs and sets autoAlpha:0. The gsap ripple tweens (autoAlpha)
+     take over afterwards and still reveal the circle during converge/touch. */
+  opacity: 0;
+  stroke: rgba(232, 232, 232, 0.54);
+  stroke-width: 0.72;
+}
+
+.touchPoint {
+  fill: var(--one-touch-silver);
+  filter: drop-shadow(0 0 3px rgba(232, 232, 232, 0.72));
+}
+
+.prompt {
+  position: absolute;
+  left: 50%;
+  width: max-content;
+  color: var(--one-touch-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.promptTop {
+  top: -12px;
+  transform: translateX(-50%);
+}
+
+.promptBottom {
+  bottom: -12px;
+  transform: translateX(-50%);
+}
+
+.credit {
+  position: absolute;
+  z-index: 6;
+  right: 24px;
+  bottom: 20px;
+  color: rgba(232, 232, 232, 0.2);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color 180ms ease;
+}
+
+.credit:hover,
+.credit:focus-visible {
+  color: rgba(232, 232, 232, 0.56);
+}
+
+@media (max-width: 720px) {
+  .geometry {
+    width: 190px;
+  }
+
+  .touchButton {
+    width: 160px;
+    height: 160px;
+  }
+
+  .credit {
+    right: 18px;
+    bottom: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .geometry {
+    will-change: auto;
+  }
+
+  .ray {
+    display: none;
+  }
+}
