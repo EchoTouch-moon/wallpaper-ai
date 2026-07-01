@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+export { CanvasFirstWorkspace as EditorWorkspace } from "@/components/editor/CanvasFirstWorkspace";
 import { AssetPanel } from "@/components/editor/AssetPanel";
 import { CanvasStage } from "@/components/editor/CanvasStage";
 import { PropertyPanel } from "@/components/editor/PropertyPanel";
@@ -8,7 +9,7 @@ import { Toolbar } from "@/components/editor/Toolbar";
 import { TemplatePreviewBar } from "@/components/editor/TemplatePreviewBar";
 import { useEditorStore } from "@/store/editorStore";
 
-export function EditorWorkspace() {
+export function LegacyEditorWorkspace() {
   const isAssetPanelOpen = useEditorStore((state) => state.isAssetPanelOpen);
   const isInspectorOpen = useEditorStore((state) => state.isInspectorOpen);
   const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
@@ -30,18 +31,18 @@ export function EditorWorkspace() {
   };
 
   return (
-    <main className="flex flex-col h-screen w-screen bg-gray-50 text-gray-900 overflow-hidden font-sans select-none">
+    <main className="minimal-editor flex flex-col h-screen w-screen overflow-hidden select-none">
       {/* Top Header / Toolbar */}
       <Toolbar />
 
       {/* Main Workspace Area (Sidebars + Canvas) */}
-      <div className="flex flex-1 flex-row overflow-hidden relative w-full h-full">
+      <div className="editor-workspace flex flex-1 flex-row overflow-hidden relative w-full h-full">
         
         {/* Left Side Navigation & Asset/Layout Panel Drawer */}
         <div className="flex h-full shrink-0 z-10">
           
           {/* Canva-style Vertical Navigation Tab Bar */}
-          <nav className="w-16 h-full border-r border-gray-200 bg-gray-50 flex flex-col items-center py-4 gap-6 shrink-0">
+          <nav className="editor-rail w-16 h-full flex flex-col items-center py-4 gap-6 shrink-0">
             {/* Assets Tab Button */}
             <button
               onClick={() => handleLeftTabClick("assets")}
@@ -96,14 +97,14 @@ export function EditorWorkspace() {
 
           {/* Left Panel Content Drawer */}
           {isAssetPanelOpen && (
-            <div className="w-[320px] h-full bg-white flex flex-col shrink-0 animate-in slide-in-from-left duration-200">
+            <div className="editor-sidecar editor-sidecar-left w-[320px] h-full flex flex-col shrink-0 animate-in slide-in-from-left duration-200">
               {leftTab === "assets" ? <AssetPanel /> : <TemplatePreviewBar />}
             </div>
           )}
         </div>
 
         {/* Center Canvas Area */}
-        <div className="flex-1 flex flex-col relative h-full bg-gray-50 overflow-hidden">
+        <div className="editor-stage flex-1 flex flex-col relative h-full overflow-hidden">
           {/* Canvas Component */}
           <div className="absolute inset-0">
             <CanvasStage />
@@ -112,7 +113,7 @@ export function EditorWorkspace() {
 
         {/* Right Sidebar Drawer */}
         {isInspectorOpen && (
-          <div className="w-[280px] h-full bg-white flex flex-col shrink-0 z-10 animate-in slide-in-from-right duration-200">
+          <div className="editor-sidecar editor-sidecar-right w-[280px] h-full flex flex-col shrink-0 z-10 animate-in slide-in-from-right duration-200">
             <PropertyPanel />
           </div>
         )}

@@ -75,12 +75,17 @@ export function CanvasStage() {
   }, [canvasSize, setPreviewScale]);
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-auto" ref={viewportRef}>
+    <div className="canvas-stage absolute inset-0 flex flex-col items-center justify-center pointer-events-auto" ref={viewportRef}>
       
       {/* Center dot pattern background */}
-      <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: "radial-gradient(#000 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+      <div className="canvas-stage-grid absolute inset-0 pointer-events-none" />
 
-      <div className="relative max-w-full max-h-full grid place-items-center bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-gray-200/60 rounded-sm" aria-label="Wallpaper canvas">
+      <div
+        aria-describedby="canvas-accessibility-note"
+        aria-label="Wallpaper canvas"
+        className="canvas-paper relative max-w-full max-h-full grid place-items-center rounded-sm"
+        role="application"
+      >
         <canvas ref={canvasElementRef} className="block" />
         
         <div className="absolute inset-0 overflow-hidden pointer-events-none z-10" aria-hidden="true">
@@ -128,12 +133,17 @@ export function CanvasStage() {
         </div>
       ) : null}
 
-      <div className="absolute bottom-4 left-4 flex gap-3 text-gray-400 text-[10px] z-0" aria-label="快捷键">
-        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">Tab</kbd> 切换聚焦</span>
-        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">⌘D</kbd> 复制</span>
-        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">↑↓←→</kbd> 微调</span>
-        <span className="flex items-center gap-1.5"><kbd className="px-1.5 py-0.5 border border-gray-200 rounded text-gray-600 bg-white font-mono text-[9px] shadow-sm">⌫</kbd> 删除</span>
-      </div>
+      <span className="visually-hidden" id="canvas-accessibility-note">
+        这是壁纸编辑画布。使用素材和排版工具打开相应控制面板。
+      </span>
+      <details className="canvas-shortcuts">
+        <summary>快捷键</summary>
+        <div>
+          <span><kbd>⌘D</kbd> 复制</span>
+          <span><kbd>↑ ↓ ← →</kbd> 微调</span>
+          <span><kbd>⌫</kbd> 删除</span>
+        </div>
+      </details>
     </div>
   );
 }

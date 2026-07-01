@@ -33,6 +33,8 @@ const SOURCE_LABELS: Record<GenerateLayoutSource, string> = {
   template: "模板",
 };
 
+type LayoutSession = NonNullable<GenerateLayoutResponse["session"]>;
+
 function getStrategyScore(candidate: LayoutCandidate) {
   const note = candidate.layout.notes.find((item) =>
     item.startsWith("Mock AI strategy:"),
@@ -72,13 +74,21 @@ function getRecommendationSummary(candidate: LayoutCandidate) {
   return candidate.reason;
 }
 
-export function TemplatePreviewBar() {
+interface TemplatePreviewBarProps {
+  onClose?: () => void;
+}
+
+export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const [approvingCandidateId, setApprovingCandidateId] = useState<string | null>(
+    null,
+  );
   const [generationMode, setGenerationMode] = useState<"ai" | "local">("ai");
   const [refinePrompt, setRefinePrompt] = useState("");
   const assets = useEditorStore((state) => state.assets);
   const candidates = useEditorStore((state) => state.candidates);
   const candidateSource = useEditorStore((state) => state.candidateSource);
+  const layoutSession = useEditorStore((state) => state.layoutSession);
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const ratioId = useEditorStore((state) => state.ratioId);
   const compositionIntent = useEditorStore((state) => state.compositionIntent);
@@ -87,13 +97,14 @@ export function TemplatePreviewBar() {
   const setCandidateSource = useEditorStore(
     (state) => state.setCandidateSource,
   );
+  const setLayoutSession = useEditorStore((state) => state.setLayoutSession);
   const setNotice = useEditorStore((state) => state.setNotice);
-  const toggleAssetPanel = useEditorStore((state) => state.toggleAssetPanel);
   const { applyLayout } = useEditorCommands();
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  const isBusy = isGenerating || approvingCandidateId !== null;
 
   const generate = async (operation: "generate" | "refine" = "generate") => {
-    if (assets.length < 3 || isGenerating) {
+    if (assets.length < 3 || isBusy) {
       return;
     }
     if (operation === "refine" && (!currentLayout || !refinePrompt.trim())) {
@@ -121,6 +132,7 @@ export function TemplatePreviewBar() {
         }
         setCandidates(result.candidates);
         setCandidateSource("mock-ai");
+        setLayoutSession(null);
         setNotice("已使用本地规则生成排版候选");
       } else {
         const response = await fetch("/api/generate-layout", {
@@ -144,11 +156,14 @@ export function TemplatePreviewBar() {
 
         setCandidates(result.candidates);
         setCandidateSource(result.source);
+        setLayoutSession(result.session ?? null);
         setNotice(
           result.warnings?.[0] ??
             (operation === "refine"
               ? "已生成布局修改候选"
-              : "已生成 AI 排版候选"),
+              : result.session
+                ? "请选择候选并确认应用"
+                : "已生成 AI 排版候选"),
         );
         if (operation === "refine") {
           setRefinePrompt("");
@@ -165,6 +180,52 @@ export function TemplatePreviewBar() {
     }
   };
 
+  const applyCandidate = async (candidate: LayoutCandidate) => {
+    if (!layoutSession || layoutSession.status !== "awaiting_approval") {
+      await applyLayout(candidate.layout);
+      return;
+    }
+    if (isBusy) {
+      return;
+    }
+
+    setApprovingCandidateId(candidate.id);
+    try {
+      const response = await fetch(
+        `/api/layout-sessions/${encodeURIComponent(layoutSession.id)}/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidateId: candidate.id }),
+        },
+      );
+      const result = (await response.json().catch(() => null)) as
+        | { candidateId?: string; session?: LayoutSession; error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Layout approval request failed");
+      }
+      if (
+        result?.candidateId !== candidate.id ||
+        result.session?.status !== "approved"
+      ) {
+        throw new Error("Layout approval response did not match the candidate");
+      }
+
+      setLayoutSession(result.session);
+      await applyLayout(candidate.layout);
+      setNotice("已确认并应用 LangGraph 排版方案");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `排版确认失败：${error.message}`
+          : "排版确认失败，请稍后重试",
+      );
+    } finally {
+      setApprovingCandidateId(null);
+    }
+  };
+
   return (
     <aside className="flex flex-col w-full h-full bg-white overflow-y-auto p-5 shrink-0 border-r border-gray-100 select-none">
       <div className="flex items-center justify-between mb-5">
@@ -172,15 +233,17 @@ export function TemplatePreviewBar() {
           <h2 className="text-sm font-semibold tracking-tight text-gray-900">智能排版</h2>
           <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider font-mono">
             {candidates.length > 0
-              ? "选择排版方向"
+              ? layoutSession?.status === "awaiting_approval"
+                ? "确认后应用排版"
+                : "选择排版方向"
               : `照片已就绪: ${assets.length}/3`}
           </span>
         </div>
         <button 
-          onClick={toggleAssetPanel}
-          className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-900 transition-colors cursor-pointer"
+          onClick={onClose}
+          className="drawer-close-control"
           aria-label="关闭智能排版面板"
-          title="关闭面板"
+          title="关闭智能排版面板"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
@@ -216,11 +279,13 @@ export function TemplatePreviewBar() {
       <button 
         className="btn-primary w-full py-2 text-xs font-semibold rounded-lg transition-colors mb-5 shadow-sm shrink-0"
         type="button" 
-        disabled={assets.length < 3 || isGenerating} 
+        disabled={assets.length < 3 || isBusy}
         onClick={() => void generate("generate")}
       >
         {isGenerating
           ? "正在生成排版..."
+          : approvingCandidateId
+            ? "正在确认候选..."
           : generationMode === "ai"
             ? "生成 AI 排版"
             : "生成本地排版"}
@@ -245,7 +310,7 @@ export function TemplatePreviewBar() {
           <button
             type="button"
             className="mt-2 w-full rounded-lg border border-gray-900 bg-white py-2 text-xs font-semibold text-gray-900 transition hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!refinePrompt.trim() || isGenerating}
+            disabled={!refinePrompt.trim() || isBusy}
             onClick={() => void generate("refine")}
           >
             生成修改候选
@@ -254,7 +319,10 @@ export function TemplatePreviewBar() {
       ) : null}
       
       {candidates.length > 0 ? (
-        <div className="flex flex-col gap-4 overflow-y-auto pr-1">
+        <div
+          className="flex flex-col gap-4 overflow-y-auto pr-1"
+          aria-busy={approvingCandidateId !== null}
+        >
           {candidates.map((candidate) => {
             const strategyScore = getStrategyScore(candidate);
             const templateType = candidate.layout.template?.type ?? "";
@@ -265,8 +333,9 @@ export function TemplatePreviewBar() {
               type="button"
               className="flex flex-col border border-gray-200 rounded-xl p-3 bg-gray-50 hover:bg-white hover:border-gray-950 transition-all cursor-pointer w-full text-left group shadow-sm hover:shadow"
               key={candidate.id}
-              onClick={() => void applyLayout(candidate.layout)}
-              aria-label={`应用排版: ${candidate.label}`}
+              disabled={isBusy}
+              onClick={() => void applyCandidate(candidate)}
+              aria-label={`${layoutSession?.status === "awaiting_approval" ? "确认并应用" : "应用"}排版: ${candidate.label}`}
               title={candidate.reason}
             >
               {/* Preview Box */}
@@ -314,6 +383,13 @@ export function TemplatePreviewBar() {
                 {candidateSource ? (
                   <span className="w-fit rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                     {SOURCE_LABELS[candidateSource]}
+                  </span>
+                ) : null}
+                {layoutSession?.status === "awaiting_approval" ? (
+                  <span className="w-fit rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                    {approvingCandidateId === candidate.id
+                      ? "正在确认…"
+                      : "待服务确认（可恢复）"}
                   </span>
                 ) : null}
                 <p className="text-[11px] leading-4 text-gray-500">
