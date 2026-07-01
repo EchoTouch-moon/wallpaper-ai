@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
 from layout_orchestrator.api import create_app
+from layout_orchestrator.contracts import LayoutGenerationRequest
+from layout_orchestrator.graph.state import LayoutGraphState
+from layout_orchestrator.graph.workflow import deterministic_planner
 
 
 def analysis(asset_id: str) -> dict[str, object]:
@@ -83,3 +88,33 @@ def test_session_rejects_invalid_request_before_creating_graph_run() -> None:
 
         assert response.status_code == 400
         assert response.json()["detail"]["error"] == "Invalid generate-layout request"
+
+
+def _validated_request() -> LayoutGenerationRequest:
+    return LayoutGenerationRequest.model_validate(request())
+
+
+def test_approval_returns_500_when_selected_candidate_is_missing_from_plan() -> None:
+    # Simulate a corrupted graph state where selected_candidate_id points at a
+    # candidate that does not exist in the plan. The API must surface a clear
+    # 500 instead of letting next() raise StopIteration (opaque 500 / framework
+    # quirk).
+    plan = deterministic_planner(_validated_request())
+    corrupted_state: LayoutGraphState = {
+        "plan": plan,
+        "selected_candidate_id": "does_not_exist",
+    }
+    fake_graph: Any = MagicMock()
+    fake_graph.invoke.return_value = corrupted_state
+
+    with TestClient(create_app(graph=fake_graph)) as client:
+        response = client.post(
+            "/v1/layout-sessions/any-session/approval",
+            json={"candidateId": "does_not_exist"},
+        )
+
+    assert response.status_code == 500
+    assert (
+        response.json()["detail"]["error"]
+        == "Approved candidate is missing from the layout plan"
+    )

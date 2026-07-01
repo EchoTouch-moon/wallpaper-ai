@@ -157,9 +157,21 @@ def create_app(
             )
 
         plan = _plan_from_state(result)
+        # await_approval guarantees the selected id belongs to this session's
+        # candidates, but we defend against state corruption / future changes
+        # with an explicit fallback rather than letting next() raise StopIteration
+        # (which FastAPI would surface as an opaque 500).
         candidate = next(
-            item for item in plan.candidates if item.id == selected_candidate_id
+            (item for item in plan.candidates if item.id == selected_candidate_id),
+            None,
         )
+        if candidate is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error": "Approved candidate is missing from the layout plan"
+                },
+            )
         return SessionApprovalResponse(
             session=SessionDetails(id=session_id, status="approved"),
             candidate=candidate,
