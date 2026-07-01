@@ -34,12 +34,24 @@ def create_sqlite_checkpointer(database_path: str) -> SqliteSaver:
 
 
 def open_checkpointer(database_url: str) -> CheckpointResource:
-    """Open SQLite or PostgreSQL checkpoint storage for the app lifespan."""
+    """Open SQLite or PostgreSQL checkpoint storage for the app lifespan.
+
+    ``PostgresSaver.from_conn_string`` returns a context manager whose
+    connection is only released by ``__exit__``. If ``setup()`` raises before
+    we hand the saver back to the caller, the context would never exit and the
+    underlying connection would leak. We therefore call ``__exit__`` on any
+    failure during setup, and defer it to the lifespan ``close`` callback only
+    on the happy path.
+    """
 
     if database_url.startswith(("postgres://", "postgresql://")):
         context = PostgresSaver.from_conn_string(database_url)
         saver = context.__enter__()
-        saver.setup()
+        try:
+            saver.setup()
+        except BaseException:
+            context.__exit__(None, None, None)
+            raise
 
         def close_postgres() -> None:
             context.__exit__(None, None, None)
