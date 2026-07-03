@@ -1,0 +1,37 @@
+{
+  "name": "@wallpaper/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WallpaperAI Desktop — Windows dynamic wallpaper layer with per-region live swap.",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:mock": "cross-env WALLPAPER_PLATFORM=mock electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:win": "pnpm build && electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@wallpaper/core": "workspace:*"
+  },
+  "optionalDependencies": {
+    "electron-as-wallpaper": "^2.0.3"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "cross-env": "^7.0.3",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.0.0"
+  }
+}
