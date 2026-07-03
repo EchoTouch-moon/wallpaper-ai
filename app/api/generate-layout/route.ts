@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import {
   createInvalidJsonResponse,
   handleGenerateLayoutRequestAsync,
-} from "../../../lib/layout-generation/handleGenerateLayoutRequest.ts";
-import { handleLangGraphGenerateLayoutRequest } from "../../../lib/layout-generation/handleLangGraphGenerateLayoutRequest.ts";
+} from "@wallpaper/core/layout-generation";
+import { handleLangGraphGenerateLayoutRequest } from "@wallpaper/core/layout-generation";
 
 export async function POST(request: Request) {
   let body: unknown;

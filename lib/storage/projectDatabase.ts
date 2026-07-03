@@ -1,6 +1,6 @@
-import { editorProjectSchema } from "@/lib/layout/layoutSchema";
-import type { ImageAsset } from "@/types/asset";
-import type { EditorProject } from "@/types/layout";
+import { editorProjectSchema } from "@wallpaper/core/layout";
+import type { ImageAsset } from "@wallpaper/core/types";
+import type { EditorProject } from "@wallpaper/core/types";
 
 const DATABASE_NAME = "wallpaper-studio-v1";
 const DATABASE_VERSION = 1;

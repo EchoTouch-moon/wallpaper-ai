@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { RATIO_PRESETS } from "@/lib/wallpaper/ratios";
+import { RATIO_PRESETS } from "@wallpaper/core/wallpaper";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
 import { useEditorStore } from "@/store/editorStore";
-import type { WallpaperRatioId } from "@/types/wallpaper";
+import type { WallpaperRatioId } from "@wallpaper/core/types";
 
 interface IconButtonProps {
   active?: boolean;

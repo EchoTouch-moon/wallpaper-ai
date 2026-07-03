@@ -3,10 +3,10 @@
 import { useEffect, useRef } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { initCanvas, resizeCanvasPreview } from "@/lib/fabric/initCanvas";
-import { SAFE_AREA_LABELS } from "@/lib/wallpaper/safeAreas";
+import { initCanvas, resizeCanvasPreview } from "@wallpaper/core/fabric";
+import { SAFE_AREA_LABELS } from "@wallpaper/core/wallpaper";
 import { useEditorStore } from "@/store/editorStore";
-import { createSafeAreas } from "@/lib/wallpaper/layoutSafeAreas";
+import { createSafeAreas } from "@wallpaper/core/wallpaper";
 
 const STAGE_PADDING = 48; // Reduced padding for docked sidebars
 

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { COMPOSITION_PRESETS } from "@/lib/wallpaper/compositionPresets";
+import { COMPOSITION_PRESETS } from "@wallpaper/core/wallpaper";
 import { useEditorStore } from "@/store/editorStore";
-import type { CompositionIntent } from "@/types/layout";
-import type { CropAspectId } from "@/types/canvas";
+import type { CompositionIntent } from "@wallpaper/core/types";
+import type { CropAspectId } from "@wallpaper/core/types";
 
 const CROP_OPTIONS: Array<{ id: CropAspectId; label: string }> = [
   { id: "free", label: "自由裁剪" },

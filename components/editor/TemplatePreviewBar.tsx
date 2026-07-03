@@ -2,15 +2,15 @@
 
 import { useState } from "react";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { createEditorLayoutRequest } from "@/lib/editor/createLayoutRequest";
-import { generateMockLayouts } from "@/lib/layout-generation/generateMockLayouts";
+import { createEditorLayoutRequest } from "@wallpaper/core/editor";
+import { generateMockLayouts } from "@wallpaper/core/layout-generation";
 import { useEditorStore } from "@/store/editorStore";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
   GenerateLayoutSource,
-} from "@/types/generateLayout";
-import type { LayoutCandidate } from "@/types/layout";
+} from "@wallpaper/core/types";
+import type { LayoutCandidate } from "@wallpaper/core/types";
 
 const TEMPLATE_TYPE_LABELS: Record<string, string> = {
   triptych: "三联屏",

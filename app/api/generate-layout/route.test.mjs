@@ -4,7 +4,7 @@ import {
   createInvalidJsonResponse,
   handleGenerateLayoutRequest,
   handleGenerateLayoutRequestAsync,
-} from "../../../lib/layout-generation/handleGenerateLayoutRequest.ts";
+} from "@wallpaper/core/layout-generation";
 
 function analysis(assetId, averageColor) {
   return {

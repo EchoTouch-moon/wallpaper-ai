@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   approveLayoutSession,
   LayoutApprovalProxyError,
-} from "../../../../../lib/layout-generation/approvalProxy.ts";
+} from "@wallpaper/core/layout-generation";
 
 type ApprovalBody = { candidateId: string };
 

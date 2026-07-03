@@ -1,0 +1,30 @@
+import type {
+  EditorProject,
+  ImageAssetAnalysis,
+  LayoutCandidate,
+  TemplateSlot,
+  TemplateType,
+  WallpaperItem,
+  WallpaperLayout,
+  WallpaperTemplate,
+} from "../layout/layoutTypes";
+
+export type CompositionIntent = WallpaperLayout["guidance"]["intent"];
+export type ImageTransition =
+  WallpaperLayout["guidance"]["transition"];
+export type ImageTransitionType = ImageTransition["type"];
+export type BoundaryTreatment =
+  WallpaperLayout["guidance"]["boundary"];
+export type BoundaryTreatmentType = BoundaryTreatment["type"];
+export type LayoutGuidance = WallpaperLayout["guidance"];
+
+export type {
+  EditorProject,
+  ImageAssetAnalysis,
+  LayoutCandidate,
+  TemplateSlot,
+  TemplateType,
+  WallpaperItem,
+  WallpaperLayout,
+  WallpaperTemplate,
+};

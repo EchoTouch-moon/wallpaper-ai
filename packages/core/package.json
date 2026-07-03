@@ -1,0 +1,57 @@
+{
+  "name": "@wallpaper/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared core for wallpaper-ai web and desktop apps: layout templates, AI layout generation, wallpaper rules, image analysis, and Fabric helpers.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./layout": {
+      "types": "./src/layout/index.ts",
+      "import": "./src/layout/index.ts"
+    },
+    "./layout-generation": {
+      "types": "./src/layout-generation/index.ts",
+      "import": "./src/layout-generation/index.ts"
+    },
+    "./wallpaper": {
+      "types": "./src/wallpaper/index.ts",
+      "import": "./src/wallpaper/index.ts"
+    },
+    "./image": {
+      "types": "./src/image/index.ts",
+      "import": "./src/image/index.ts"
+    },
+    "./fabric": {
+      "types": "./src/fabric/index.ts",
+      "import": "./src/fabric/index.ts"
+    },
+    "./editor": {
+      "types": "./src/editor/index.ts",
+      "import": "./src/editor/index.ts"
+    },
+    "./storage": {
+      "types": "./src/storage/index.ts",
+      "import": "./src/storage/index.ts"
+    },
+    "./types": {
+      "types": "./src/types/index.ts",
+      "import": "./src/types/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"src/**/*.test.mjs\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fabric": "^7.4.0",
+    "openai": "^6.42.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

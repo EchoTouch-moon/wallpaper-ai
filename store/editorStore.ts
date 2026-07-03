@@ -3,26 +3,26 @@ import {
   commitHistory,
   redoHistory,
   undoHistory,
-} from "@/lib/editor/history";
-import { getRatioPreset } from "@/lib/wallpaper/ratios";
-import type { ImageAsset } from "@/types/asset";
+} from "@wallpaper/core/editor";
+import { getRatioPreset } from "@wallpaper/core/wallpaper";
+import type { ImageAsset } from "@wallpaper/core/types";
 import type {
   CanvasObjectSnapshot,
   CanvasSize,
   CropSession,
   SnapGuides,
-} from "@/types/canvas";
+} from "@wallpaper/core/types";
 import type {
   CompositionIntent,
   EditorProject,
   LayoutCandidate,
   WallpaperLayout,
-} from "@/types/layout";
-import type { WallpaperRatioId } from "@/types/wallpaper";
+} from "@wallpaper/core/types";
+import type { WallpaperRatioId } from "@wallpaper/core/types";
 import type {
   GenerateLayoutResponse,
   GenerateLayoutSource,
-} from "@/types/generateLayout";
+} from "@wallpaper/core/types";
 
 type LayoutSession = NonNullable<GenerateLayoutResponse["session"]>;
 

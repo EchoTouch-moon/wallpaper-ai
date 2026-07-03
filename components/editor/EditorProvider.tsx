@@ -20,29 +20,29 @@ import {
 import {
   calculateCropFrame,
   calculateCropPan,
-} from "@/lib/fabric/crop";
-import { downloadPng, renderCanvasPng } from "@/lib/fabric/exportCanvas";
-import { applyLayoutToCanvas, type LayoutFabricImage } from "@/lib/fabric/applyLayout";
-import { serializeCanvasLayout } from "@/lib/fabric/serializeLayout";
-import { swapLayoutItemAssets } from "@/lib/layout/swap";
+} from "@wallpaper/core/fabric";
+import { downloadPng, renderCanvasPng } from "@wallpaper/core/fabric";
+import { applyLayoutToCanvas, type LayoutFabricImage } from "@wallpaper/core/fabric";
+import { serializeCanvasLayout } from "@wallpaper/core/fabric";
+import { swapLayoutItemAssets } from "@wallpaper/core/layout";
 import {
   createSnapSession,
   resetSnapSession,
   snapObjectToGeometry,
-} from "@/lib/fabric/snapping";
+} from "@wallpaper/core/fabric";
 import {
   deleteStoredAsset,
   loadProjectDraft,
   saveProjectDraft,
 } from "@/lib/storage/projectDatabase";
-import { createProjectSnapshot } from "@/lib/storage/projectSnapshot";
+import { createProjectSnapshot } from "@wallpaper/core/storage";
 import { useEditorStore } from "@/store/editorStore";
-import type { ImageAsset } from "@/types/asset";
+import type { ImageAsset } from "@wallpaper/core/types";
 import type {
   CanvasObjectSnapshot,
   CropAspectId,
-} from "@/types/canvas";
-import type { WallpaperItem, WallpaperLayout } from "@/types/layout";
+} from "@wallpaper/core/types";
+import type { WallpaperItem, WallpaperLayout } from "@wallpaper/core/types";
 
 interface EditorFabricObject extends FabricObject {
   objectId?: string;

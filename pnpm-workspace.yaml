@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  # Root web app is the Next.js project itself (current wallpaper-ai).
+
+# pnpm 11 gates dependencies' build scripts behind an interactive approval
+# flow (ERR_PNPM_IGNORED_BUILDS). Transitive native deps (sharp via Next.js,
+# canvas via fabric) don't need their install scripts for build/test/typecheck.
+dangerouslyAllowAllBuilds: true

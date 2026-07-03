@@ -2,7 +2,7 @@
 
 import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { useEditorCommands } from "@/components/editor/EditorProvider";
-import { createImageAsset } from "@/lib/image/extractMetadata";
+import { createImageAsset } from "@wallpaper/core/image";
 import { saveAssetBlob } from "@/lib/storage/projectDatabase";
 import { useEditorStore } from "@/store/editorStore";
 

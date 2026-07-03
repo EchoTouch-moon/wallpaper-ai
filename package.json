@@ -7,13 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --test --experimental-strip-types lib/*/*.test.mjs app/api/*/*.test.mjs",
+    "test": "node --test --experimental-strip-types app/api/*/*.test.mjs",
     "test:ai:smoke": "node --experimental-strip-types scripts/smoke-layout-model.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
+    "@wallpaper/core": "workspace:*",
     "fabric": "^7.0.0",
     "gsap": "^3.15.0",
     "next": "^16.0.0",
