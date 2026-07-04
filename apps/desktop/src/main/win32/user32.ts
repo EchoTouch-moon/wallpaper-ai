@@ -40,6 +40,8 @@ import koffi from "koffi";
 // -1=TOPMOST, -2=NOTOPMOST). We use HWND_BOTTOM to push the wallpaper to the
 // bottom of WorkerW's child Z-order so SHELLDLL_DefView (icons) stays on top.
 const HWND_BOTTOM = 1;
+const SWP_NOSIZE = 0x0001;
+const SWP_NOMOVE = 0x0002;
 const SWP_NOACTIVATE = 0x0010; // never activate the wallpaper window
 const SMTO_NORMAL = 0x0000;
 const WM_SPAWN_WORKERW = 0x052c; // undocumented; makes Progman spawn WorkerW
@@ -277,3 +279,37 @@ export function reassertBottomZOrder(
     SWP_NOACTIVATE,
   );
 }
+
+/**
+ * Lighter-weight re-embed used by the guardian when the window has been
+ * detached from WorkerW (Explorer rebuilt the desktop). Differs from
+ * embedToDesktop() in two crucial ways:
+ *
+ *   1. Does NOT re-send 0x052C to Progman. That message is what tells Explorer
+ *      to spawn a fresh WorkerW, and re-sending it during a desktop refresh
+ *      can actually trigger ANOTHER rebuild cycle — feeding the flicker loop.
+ *      Instead we just find the currently-existing WorkerW and re-attach.
+ *   2. Skips the pre-position SetWindowPos (the window already has correct
+ *      geometry; only its parent changed).
+ *
+ * Returns the new WorkerW HWND on success, 0 on failure.
+ */
+export function reEmbedOnly(hwndPtr: Buffer): number {
+  const hwnd = readHwnd(hwndPtr);
+  if (IsWindow(hwnd) === 0) {
+    return 0;
+  }
+  const workerW = findWallpaperWorkerW();
+  if (workerW === 0) {
+    // No WorkerW exists right now (Explorer is mid-rebuild). Caller will retry
+    // on the next tick — the new WorkerW typically appears within tens of ms.
+    return 0;
+  }
+  if (SetParent(hwnd, workerW) === 0) {
+    return 0;
+  }
+  // One SetWindowPos to put us at HWND_BOTTOM in the (new) parent's Z-order.
+  SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+  return workerW;
+}
+

@@ -29,6 +29,7 @@ interface Win32Module {
     hwnd: Buffer,
     bounds: { x: number; y: number; width: number; height: number },
   ): void;
+  reEmbedOnly(hwnd: Buffer): number;
 }
 
 let modPromise: Promise<Win32Module> | null = null;
@@ -99,36 +100,37 @@ export function createWin32Platform(): DesktopPlatform {
 }
 
 /**
- * Guardian tick: inspect the wallpaper window's Win32 state and, if it has
- * been detached from WorkerW (Explorer rebuilt the desktop) or hidden,
- * re-embed/re-assert. Returns a snapshot for logging.
+ * Guardian tick: inspect the wallpaper window's Win32 state and re-embed if
+ * it has been detached from WorkerW (Explorer rebuilt the desktop).
  *
- * Called by the main process on a short interval (P1.7 watchdog).
+ * CRITICAL: the healthy path does NOTHING — no SetWindowPos, no invalidate.
+ * Earlier versions called reassertBottomZOrder() every tick even when healthy,
+ * which itself perturbed the window and contributed to flicker. Per Lively/
+ * weebp: the right pattern is tight polling (~250ms) that only acts on actual
+ * detachment, so the steady state is silent.
+ *
+ * Returns a short status string for logging. Healthy ticks log nothing extra
+ * (only the periodic heartbeat line from main).
  */
 export async function guardianTick(): Promise<string> {
-  if (!lastHwnd || !lastBounds) return "no-window";
+  if (!lastHwnd) return "no-window";
   const mod = await loadModule();
   const snap = mod.inspectWindowState(lastHwnd);
-  const summary = `valid=${snap.hwndValid} visible=${snap.windowVisible} parentWorkerW=${snap.parentIsWorkerW} parentHwnd=${snap.parentHwnd}`;
   if (!snap.hwndValid) {
-    return `invalid-handle; ${summary}`;
+    return `invalid-handle`;
   }
   if (!snap.parentIsWorkerW) {
-    // Window got detached from WorkerW (e.g. Explorer refreshed the desktop).
-    // Re-embed from scratch.
-    try {
-      const re = mod.embedToDesktop(lastHwnd, lastBounds);
-      return `detached-from-workerw; re-embed=${re}; ${summary}`;
-    } catch (e) {
-      return `detached; re-embed-failed=${(e as Error).message}; ${summary}`;
-    }
+    // Detached — Explorer rebuilt WorkerW. Re-embed without re-sending 0x052C
+    // (re-sending triggers another rebuild cycle, feeding the flicker loop).
+    const newParent = mod.reEmbedOnly(lastHwnd);
+    return newParent !== 0
+      ? `re-embedded into workerw=${newParent}`
+      : `detached; no workerw yet (will retry next tick)`;
   }
   if (!snap.windowVisible) {
-    // Still in WorkerW but WS_VISIBLE was cleared — re-assert visibility + Z.
-    mod.reassertBottomZOrder(lastHwnd, lastBounds);
-    return `hidden; reasserted; ${summary}`;
+    mod.reassertBottomZOrder(lastHwnd, lastBounds ?? { x: 0, y: 0, width: 1920, height: 1080 });
+    return `was-hidden; reasserted`;
   }
-  // Healthy: still re-assert Z-order defensively (cheap).
-  mod.reassertBottomZOrder(lastHwnd, lastBounds);
-  return `healthy; ${summary}`;
+  // Healthy — do NOT touch the window. Return empty so main can skip logging.
+  return "";
 }

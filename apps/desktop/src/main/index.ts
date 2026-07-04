@@ -166,27 +166,38 @@ async function bootstrap(): Promise<void> {
   // the window's geometry alone.
   console.log("[main] embed complete, window left as-is");
 
-  // Background-keepalive heartbeat: the wallpaper window is never focused
-  // (focusable:false + SWP_NOACTIVATE), so even with backgroundThrottling
-  // disabled at the webPreferences level, some Windows/DWM builds still let
-  // Chromium's software-renderer release its paint target after the window
-  // P1.7 watchdog: run every 5s. Inspects the wallpaper window's Win32 state
-  // (is it still parented into WorkerW? still visible?), re-embeds if Explorer
-  // rebuilt the desktop, re-asserts Z-order, and forces a repaint. The previous
-  // 30s invalidate-only heartbeat couldn't react to the "disappears on startup
-  // complete" symptom because the window's Win32 state changed faster than 30s
-  // could repair. Each tick logs a one-line snapshot so we can see exactly when
-  // and how the state breaks.
+  // P1.8 guardian watchdog: poll every 250ms. This is the consensus pattern
+  // across Lively/weebp/SpoutWallpaper — RegisterShellHookWindow does NOT fire
+  // for WorkerW (it's not taskbar-eligible), so event-driven re-embed is
+  // impossible; tight polling is what mature apps actually do.
+  //
+  // CRITICAL: the guardian only ACTS when the window is actually detached
+  // from WorkerW. The healthy path is a silent no-op — no SetWindowPos, no
+  // invalidate, no logging. Earlier versions perturbed the window every tick
+  // even when healthy, which itself caused flicker. Steady state = silent.
+  //
+  // 250ms is fast enough that Explorer rebuilding WorkerW is repaired before
+  // the user notices (human perception threshold for flicker is ~100ms, but
+  // the new WorkerW typically exists within tens of ms of the old one dying,
+  // so re-embed usually lands inside the same refresh frame).
+  let healthyTickCount = 0;
   setInterval(async () => {
     if (window.isDestroyed()) return;
-    window.webContents.invalidate();
     if (platform.name === "win32") {
       const { guardianTick } = await import("./platform/win32");
       const snap = await guardianTick();
-      console.log(`[guardian] ${snap}`);
+      if (snap === "") {
+        // Healthy — silent. Log a heartbeat only every 12 ticks (~3s) so we
+        // know the watchdog is alive without spamming.
+        if (++healthyTickCount % 12 === 0) {
+          console.log(`[guardian] healthy (12 ticks)`);
+        }
+      } else {
+        console.log(`[guardian] ${snap}`);
+      }
     }
-  }, 5_000);
-  console.log("[main] guardian watchdog armed (5s)");
+  }, 250);
+  console.log("[main] guardian watchdog armed (250ms)");
 }
 
 // CRITICAL for the wallpaper-layer technique: disable GPU hardware
