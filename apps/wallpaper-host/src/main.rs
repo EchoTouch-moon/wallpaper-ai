@@ -115,6 +115,16 @@ fn main() -> anyhow::Result<()> {
     );
     log_window_state(hwnd, "after create");
 
+    // Strip WS_CAPTION/WS_THICKFRAME/WS_SYSMENU NOW (before WebView2 creation)
+    // and force a frame change. tao's with_decorations(false) does NOT remove
+    // these styles on Windows — the window is born with WS_CAPTION, which gives
+    // it ~11px non-client insets at DPI 1.5x. If we leave them, WRY_WEBVIEW
+    // anchors at client (0,0) = screen (11,2), producing the off-center gap.
+    // Clearing here + SWP_FRAMECHANGED makes the whole window rect client area,
+    // so children anchor at screen (0,0).
+    strip_non_client(hwnd);
+    log_window_state(hwnd, "after strip_non_client");
+
     // A0 critical: do NOT touch styles before WebView2 creation. No WS_CHILD,
     // no WS_EX_LAYERED, no WS_EX_TRANSPARENT, no SetLayeredWindowAttributes.
     // The previous code mixed these in and they may have caused E_INVALIDARG.
@@ -163,7 +173,10 @@ fn run_event_loop(
     // Hold webview + window alive via the closure. window is moved in below.
     let webview = webview;
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        // Poll instead of Wait so MainEventsCleared fires continuously — needed
+        // for the reparent delay + guardian tick to actually run. Wait blocks
+        // when there are no window events (e.g. after WS_EX_TRANSPARENT).
+        *control_flow = ControlFlow::Poll;
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -201,11 +214,15 @@ fn do_reparent(
     webview: &wry::WebView,
 ) -> anyhow::Result<()> {
     use windows::Win32::Foundation::{GetLastError, SetLastError, HWND};
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMNCRENDERINGPOLICY, DWMWA_NCRENDERING_POLICY,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, HWND_BOTTOM,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_LONG_PTR_INDEX, WS_CHILD,
-        WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
-        WS_POPUP,
+        GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, HWND_BOTTOM,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_LONG_PTR_INDEX, WS_CAPTION,
+        WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+        WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
     };
     const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
     const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
@@ -215,8 +232,20 @@ fn do_reparent(
 
     let hwnd = HWND(hwnd as _);
     unsafe {
+        // GWL_STYLE: clear ALL non-client-area styles (caption/sysmenu/thickframe
+        // + minimize/maximize boxes) — these are what produce the visible
+        // "WallpaperAI" title bar + border ("shell") when reparented into WorkerW.
+        // Also clear WS_POPUP. Keep only WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN |
+        // WS_CLIPSIBLINGS (the bare minimum for a child that paints content).
         let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
-        let new_style = (style & !WS_POPUP.0) | WS_CHILD.0;
+        let clear_mask = WS_POPUP.0
+            | WS_CAPTION.0
+            | WS_THICKFRAME.0
+            | WS_SYSMENU.0
+            | WS_MINIMIZEBOX.0
+            | WS_MAXIMIZEBOX.0;
+        let keep_mask = WS_CHILD.0 | WS_VISIBLE.0 | WS_CLIPCHILDREN.0 | WS_CLIPSIBLINGS.0;
+        let new_style = (style & !clear_mask) | keep_mask;
         SetWindowLongPtrW(hwnd, GWLP_STYLE_IDX, new_style as isize);
         println!("[reparent] GWL_STYLE 0x{:x} -> 0x{:x}", style, new_style);
 
@@ -254,16 +283,58 @@ fn do_reparent(
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
         );
         println!("[reparent] SetWindowPos HWND_BOTTOM {}x{}", w, h);
+
+        // Tell DWM NOT to render any non-client area for this window. Even with
+        // WS_CAPTION/WS_THICKFRAME cleared, Win11 DWM adds a hidden ~11px resize
+        // border (for snap gestures) that shrinks client area below the window
+        // size. DWMWA_NCRENDERING_POLICY=DWMNCRP_DISABLED makes the entire window
+        // rect usable as client area, eliminating the 22x13px letterbox.
+        let policy = DWMNCRENDERINGPOLICY(2); // DWMNCRP_DISABLED
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_NCRENDERING_POLICY,
+            &policy as *const _ as *const _,
+            std::mem::size_of::<DWMNCRENDERINGPOLICY>() as u32,
+        );
+        println!("[reparent] DWM NC rendering disabled");
+
+        // Verify final client area matches what we asked for. Per spec: use
+        // the host WorkerW's GetClientRect to confirm the target paint surface.
+        let mut client = windows::Win32::Foundation::RECT::default();
+        if GetClientRect(hwnd, &mut client).is_ok() {
+            println!(
+                "[reparent] host GetClientRect = {}x{}",
+                client.right - client.left,
+                client.bottom - client.top
+            );
+        }
+        let mut parent_client = windows::Win32::Foundation::RECT::default();
+        if GetClientRect(target.parent, &mut parent_client).is_ok() {
+            println!(
+                "[reparent] WorkerW GetClientRect = {}x{}",
+                parent_client.right - parent_client.left,
+                parent_client.bottom - parent_client.top
+            );
+        }
     }
 
-    // Sync webview bounds to the screen size (physical px), matching the
-    // window size set above. Previously hardcoded 1920x1080 which clipped.
+    // Sync webview bounds. Use LogicalSize because wry's Rect.size is dpi::Size
+    // which it converts via to_physical(scale_factor) internally — passing
+    // PhysicalSize would be double-scaled on a 1.5x DPI display. Compute the
+    // logical size from the physical screen size + the host's DPI.
     let (sw, sh) = primary_screen_size();
+    let dpi = dpi_for_hwnd(hwnd_isize(hwnd));
+    let scale = dpi as f64 / 96.0;
+    let logical_w = sw as f64 / scale;
+    let logical_h = sh as f64 / scale;
     let _ = webview.set_bounds(wry::Rect {
-        position: tao::dpi::PhysicalPosition::new(0.0, 0.0).into(),
-        size: tao::dpi::PhysicalSize::new(sw as f64, sh as f64).into(),
+        position: tao::dpi::LogicalPosition::new(0.0, 0.0).into(),
+        size: tao::dpi::LogicalSize::new(logical_w, logical_h).into(),
     });
-    println!("[reparent] webview.set_bounds {}x{}", sw, sh);
+    println!(
+        "[reparent] webview.set_bounds logical {}x{} (physical {}x{}, dpi={}, scale={})",
+        logical_w, logical_h, sw, sh, dpi, scale
+    );
 
     log_window_state(hwnd_isize(hwnd), "after reparent");
     println!("[reparent] mode={:?} done", mode);
@@ -279,7 +350,7 @@ fn hwnd_isize(hwnd: windows::Win32::Foundation::HWND) -> isize {
 fn log_window_state(hwnd_isize: isize, label: &str) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, GetClassNameW, GetWindowLongPtrW, GetWindowRect, WINDOW_LONG_PTR_INDEX,
+        EnumChildWindows, GetWindowLongPtrW, GetWindowRect, WINDOW_LONG_PTR_INDEX,
     };
     const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
     const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
@@ -306,22 +377,31 @@ fn log_window_state(hwnd_isize: isize, label: &str) {
             rect.bottom - rect.top
         );
         // List direct children (WRY_WEBVIEW container + WebView2 children).
-        let mut kids: Vec<(isize, String, u32, bool)> = Vec::new();
+        // Record rect to diagnose alignment (does WRY_WEBVIEW fill the client area?).
+        let mut kids: Vec<(isize, String, bool, i32, i32, i32, i32)> = Vec::new();
         unsafe extern "system" fn child_proc(
             hwnd: HWND,
             lparam: windows::Win32::Foundation::LPARAM,
         ) -> windows::core::BOOL {
-            let kids = &mut *(lparam.0 as *mut Vec<(isize, String, u32, bool)>);
+            let kids = &mut *(lparam.0 as *mut Vec<(isize, String, bool, i32, i32, i32, i32)>);
             use windows::Win32::UI::WindowsAndMessaging::{
-                GetWindowLongPtrW, IsWindowVisible, WINDOW_LONG_PTR_INDEX,
+                GetClassNameW, GetWindowRect, IsWindowVisible,
             };
-            const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
-            let ex = GetWindowLongPtrW(hwnd, GWLP_EXSTYLE_IDX) as u32;
             let mut buf = [0u16; 64];
             GetClassNameW(hwnd, &mut buf);
             let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
             let cls = String::from_utf16_lossy(&buf[..len]);
-            kids.push((hwnd.0 as isize, cls, ex, IsWindowVisible(hwnd).as_bool()));
+            let mut r = windows::Win32::Foundation::RECT::default();
+            let _ = GetWindowRect(hwnd, &mut r);
+            kids.push((
+                hwnd.0 as isize,
+                cls,
+                IsWindowVisible(hwnd).as_bool(),
+                r.left,
+                r.top,
+                r.right - r.left,
+                r.bottom - r.top,
+            ));
             windows::core::BOOL(1)
         }
         let _ = EnumChildWindows(
@@ -329,8 +409,11 @@ fn log_window_state(hwnd_isize: isize, label: &str) {
             Some(child_proc),
             windows::Win32::Foundation::LPARAM(&mut kids as *mut _ as isize),
         );
-        for (k, cls, kex, vis) in &kids {
-            println!("  child 0x{:x} {} ex=0x{:x} vis={}", k, cls, kex, vis);
+        for (k, cls, vis, x, y, w, h) in &kids {
+            println!(
+                "  child 0x{:x} {} vis={} rect={},{},{}x{}",
+                k, cls, vis, x, y, w, h
+            );
         }
     }
 }
@@ -348,6 +431,46 @@ fn class_name(hwnd: windows::Win32::Foundation::HWND) -> String {
 /// (e.g. 1707x1067 on this machine), NOT the WorkerW rect (which may include
 /// virtual-display extension). Used for both window creation and webview bounds
 /// so the renderer fills the screen exactly with no clipping.
+/// Remove WS_CAPTION/WS_THICKFRAME/WS_SYSMENU and force a frame change so the
+/// window has ZERO non-client area. tao's with_decorations(false) leaves these
+/// styles in place on Windows, giving the window ~11px insets at DPI 1.5x that
+/// offset WRY_WEBVIEW from (0,0). Must be called before WebView2 creation so
+/// the webview anchors at the true client origin.
+fn strip_non_client(hwnd_isize: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_MAXIMIZEBOX,
+        WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+    };
+    const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
+    let hwnd = HWND(hwnd_isize as _);
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
+        let clear = WS_CAPTION.0
+            | WS_THICKFRAME.0
+            | WS_SYSMENU.0
+            | WS_MINIMIZEBOX.0
+            | WS_MAXIMIZEBOX.0
+            | WS_POPUP.0;
+        let new_style = style & !clear;
+        SetWindowLongPtrW(hwnd, GWLP_STYLE_IDX, new_style as isize);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+        println!(
+            "[strip_non_client] GWL_STYLE 0x{:x} -> 0x{:x}",
+            style, new_style
+        );
+    }
+}
+
 fn primary_screen_size() -> (i32, i32) {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SYSTEM_METRICS_INDEX};
     const SM_CXSCREEN: SYSTEM_METRICS_INDEX = SYSTEM_METRICS_INDEX(0);
@@ -355,6 +478,21 @@ fn primary_screen_size() -> (i32, i32) {
     let w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
     (w, h)
+}
+
+/// Get the DPI for a window (via Win32 GetDpiForWindow). Falls back to system
+/// DPI (96) if the call fails. Used to convert physical screen px → logical px
+/// for wry's set_bounds (which expects logical sizes and scales internally).
+fn dpi_for_hwnd(hwnd_isize: isize) -> u32 {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    let hwnd = HWND(hwnd_isize as _);
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if dpi == 0 {
+        96
+    } else {
+        dpi
+    }
 }
 
 /// Minimal guardian: healthy path is a no-op.
