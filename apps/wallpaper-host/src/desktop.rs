@@ -53,9 +53,11 @@ pub struct DesktopTarget {
     pub parent: HWND,
     /// Z-order anchor: our window goes just below this HWND. None = HWND_BOTTOM.
     pub insert_after: Option<HWND>,
-    /// SHELLDLL_DefView HWND (icons container).
+    /// SHELLDLL_DefView HWND (icons container). Used by Raised/Collapsed branches.
+    #[allow(dead_code)]
     pub def_view: HWND,
-    /// The wallpaper-paint WorkerW, if separate from parent.
+    /// The wallpaper-paint WorkerW, if separate from parent. Used by guardian.
+    #[allow(dead_code)]
     pub worker_w: Option<HWND>,
 }
 
