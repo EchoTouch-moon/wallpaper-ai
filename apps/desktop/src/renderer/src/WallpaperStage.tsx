@@ -97,10 +97,7 @@ export function WallpaperStage() {
       style={{
         position: "fixed",
         inset: 0,
-        // Transparent so the magenta diagnostic background (from index.html)
-        // shows through gaps between slots. If you see magenta, the window is
-        // painting. Once rendering is confirmed stable, set back to #0b1120.
-        background: "transparent",
+        background: "#0b1120",
         overflow: "hidden",
       }}
     >

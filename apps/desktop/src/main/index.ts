@@ -71,6 +71,13 @@ function createWallpaperWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // CRITICAL: the wallpaper window is never the active/focused window
+      // (focusable:false + SWP_NOACTIVATE). Without this, Chromium throttles
+      // timer/timers/RAF of background windows, and under software rendering
+      // (disableHardwareAcceleration) the paint target gets released — the
+      // window goes solid white after a few seconds of being in the
+      // background. (P1.6: this was removed by mistake in P1.5.)
+      backgroundThrottling: false,
     },
   });
 
@@ -134,15 +141,27 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  // NOTE: do NOT call setBounds / invalidate after embedding.
-  // Earlier phases added a post-embed "force repaint" (nudge bounds by 1px +
-  // invalidate) to work around a GPU swap-chain issue. P1.4's software
-  // rendering fixed the actual rendering, and the post-embed setBounds was
-  // the cause of the "triptych flashes then disappears" symptom: resizing a
-  // BrowserWindow after it has been reparented into WorkerW lets DWM push it
-  // into a hidden / bottom Z-order state. Once loadURL has painted and the
-  // WorkerW reparent is done, leave the window alone.
+  // NOTE: do NOT call setBounds after embedding — resizing a BrowserWindow
+  // once it's been reparented into WorkerW lets DWM push it into a hidden /
+  // bottom Z-order state (the "triptych flashes then disappears" symptom from
+  // P1.5). Once loadURL has painted and the WorkerW reparent is done, leave
+  // the window's geometry alone.
   console.log("[main] embed complete, window left as-is");
+
+  // Background-keepalive heartbeat: the wallpaper window is never focused
+  // (focusable:false + SWP_NOACTIVATE), so even with backgroundThrottling
+  // disabled at the webPreferences level, some Windows/DWM builds still let
+  // Chromium's software-renderer release its paint target after the window
+  // stays backgrounded for a while — the window turns solid white.
+  // invalidate() forces the compositor to repaint without touching geometry,
+  // so it doesn't trigger the Z-order issue that setBounds does. Run it on a
+  // slow interval (every 30s) as a low-cost keepalive.
+  setInterval(() => {
+    if (!window.isDestroyed()) {
+      window.webContents.invalidate();
+    }
+  }, 30_000);
+  console.log("[main] keepalive heartbeat armed (30s)");
 }
 
 // CRITICAL for the wallpaper-layer technique: disable GPU hardware
