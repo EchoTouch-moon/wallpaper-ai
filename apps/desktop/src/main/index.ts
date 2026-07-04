@@ -61,11 +61,11 @@ function createWallpaperWindow(): BrowserWindow {
     skipTaskbar: true,
     // The wallpaper layer must NOT steal focus or float above everything.
     // focusable:false + alwaysOnTop:false keep it from disrupting the user's
-    // active window and (combined with WorkerW reparenting + SetWindowPos
-    // patch) let it sit behind desktop icons. (P1 Windows verification, error 6.)
+    // active window. After WorkerW reparenting, the window sits structurally
+    // behind SHELLDLL_DefView (icons), so click-through to icons is automatic —
+    // no setIgnoreMouseEvents / WS_EX_TRANSPARENT needed (per Lively design).
     focusable: false,
     alwaysOnTop: false,
-    transparent: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
@@ -109,10 +109,11 @@ async function bootstrap(): Promise<void> {
     await window.loadFile(join(__dirname, "../renderer/index.html"));
   }
 
-  // Click-through by default: clicks fall through to desktop icons. The
-  // `{ forward: true }` keeps mousemove events flowing so the renderer can
-  // implement hover highlights in a future "interactive mode".
-  window.setIgnoreMouseEvents(true, { forward: true });
+  // No setIgnoreMouseEvents: with correct WorkerW reparenting, clicks on
+  // desktop icons reach the icons automatically (icons live in
+  // SHELLDLL_DefView, a sibling above our WorkerW child). Clicks on empty
+  // desktop area land on the wallpaper layer, which is the desired behavior
+  // (lets us implement interactive slots later without mouse-passthrough).
 }
 
 // Single instance lock — second launches focus the existing app instead.

@@ -15,15 +15,8 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
-    "@wallpaper/core": "workspace:*"
-  },
-  "optionalDependencies": {
-    "electron-as-wallpaper": "^2.0.3"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "electron-as-wallpaper@2.0.3": "patches/electron-as-wallpaper@2.0.3.patch"
-    }
+    "@wallpaper/core": "workspace:*",
+    "koffi": "^3.1.0"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.0",

@@ -7,11 +7,10 @@ import react from "@vitejs/plugin-react";
 // electron-vite 5 + Electron 43 — it fails to externalize `electron`, so the
 // built main/preload end up `require`ing electron's install script (which
 // returns the binary path string, not the API). Declaring `external` explicitly
-// on each target fixes that and keeps native modules (electron-as-wallpaper,
-// bindings) resolvable at runtime.
+// on each target fixes that. koffi is bundled (pure JS, no native deps).
 //
 // Ref: P1 Windows verification (error 3 & 5).
-const mainExternal = ["electron", "electron-as-wallpaper", "bindings"];
+const mainExternal = ["electron"];
 const preloadExternal = ["electron"];
 
 export default defineConfig({

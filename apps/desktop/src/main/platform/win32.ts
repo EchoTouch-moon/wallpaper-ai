@@ -2,43 +2,33 @@ import { globalShortcut, screen, type BrowserWindow } from "electron";
 import type { DesktopPlatform, DisplayInfo, SecretStore } from "../../shared/desktop-platform";
 
 /**
- * Windows platform — real WorkerW wallpaper-layer embedding.
+ * Windows platform — real WorkerW wallpaper-layer embedding via direct
+ * user32.dll calls (koffi FFI).
  *
- * Uses `electron-as-wallpaper` (a Neon/Rust native addon) which is only
- * installable/compilable on Windows. We therefore `import()` it dynamically
- * so this module can be loaded on any platform without failing at import
- * time; the import only executes when actually running on win32.
+ * Why not `electron-as-wallpaper` (Neon/Rust addon)? That package omits two
+ * load-bearing steps of the canonical sequence (WorkerW discovery by
+ * enumerating the SHELLDLL_DefView host, and SWP_NOACTIVATE), so the embedded
+ * window occludes desktop icons and gets destroyed by Win11. We implement the
+ * full Lively/weebp sequence directly. koffi is pure JS — no Rust toolchain,
+ * no native rebuilds — so Windows setup no longer needs Rust/VS Build Tools.
  *
- * `safeStorage` is used for LLM key encryption (backed by DPAPI on Windows).
+ * This module is only imported when process.platform === "win32" (see
+ * resolvePlatformChoice). The user32.ts module loads user32.dll at eval time,
+ * which throws on non-Windows, so we use a dynamic import here too.
  */
 
-interface AttachOptions {
-  transparent?: boolean;
-  forwardMouseInput?: boolean;
-  forwardKeyboardInput?: boolean;
-}
+let embedFn: ((hwnd: Buffer, bounds: { x: number; y: number; width: number; height: number }) => boolean) | null =
+  null;
 
-interface ElectronAsWallpaper {
-  attach(window: BrowserWindow, options?: AttachOptions): void;
-  detach(window: BrowserWindow): void;
-  reset(): void;
-}
-
-// electron-as-wallpaper adds a `wallpaperState` field to BrowserWindow at
-// runtime after attach(); Electron's types already declare it as optional, so
-// we read it defensively without re-declaring the module.
-
-async function loadWallpaperLib(): Promise<ElectronAsWallpaper> {
-  // Dynamic import: only resolves on Windows where the native addon was built.
-  const mod = (await import(
-    /* webpackIgnore: true */ "electron-as-wallpaper"
-  )) as unknown as ElectronAsWallpaper;
-  return mod;
+async function loadEmbedFn() {
+  if (embedFn) return embedFn;
+  const mod = await import("../win32/user32.js");
+  embedFn = mod.embedToDesktop;
+  return embedFn;
 }
 
 export function createWin32Platform(): DesktopPlatform {
   let embedded = false;
-  let lib: ElectronAsWallpaper | null = null;
 
   const secrets: SecretStore = {
     async get(key) {
@@ -54,27 +44,23 @@ export function createWin32Platform(): DesktopPlatform {
 
   return {
     name: "win32",
-    async embedToWallpaperLayer(window) {
-      if (!lib) {
-        lib = await loadWallpaperLib();
-      }
+    async embedToWallpaperLayer(window: BrowserWindow): Promise<boolean> {
+      const embed = await loadEmbedFn();
+      // Use the primary display's bounds (MVP single-monitor). Multi-monitor
+      // arrives in a later phase: one wallpaper window per display, each
+      // parented into the same WorkerW via MapWindowPoints.
+      const primary = screen.getPrimaryDisplay();
+      const b = primary.bounds;
       try {
-        // transparent: true so the wallpaper layer can show the desktop behind
-        // any unrendered regions. Mouse/keyboard forwarding left off in P1 —
-        // the wallpaper layer is click-through by default (setIgnoreMouseEvents).
-        lib.attach(window, {
-          transparent: true,
-          forwardKeyboardInput: false,
-          forwardMouseInput: false,
+        embedded = embed(window.getNativeWindowHandle(), {
+          x: b.x,
+          y: b.y,
+          width: b.width,
+          height: b.height,
         });
-        // Verify via the runtime-added wallpaperState. The library sets this on
-        // the BrowserWindow after a successful attach(); if it's missing or
-        // false, treat the embed as failed so the caller can fall back.
-        const attached = window.wallpaperState?.isAttached === true;
-        embedded = attached;
-        return attached;
+        return embedded;
       } catch (error) {
-        console.error("[win32] attach failed:", error);
+        console.error("[win32] embed failed:", error);
         embedded = false;
         return false;
       }
@@ -95,9 +81,8 @@ export function createWin32Platform(): DesktopPlatform {
         scaleFactor: d.scaleFactor,
       }));
     },
-    async setAutoLaunch(enable) {
-      // Wired in main via app.setLoginItemSettings; kept here for interface parity.
-      void enable;
+    async setAutoLaunch(_enable) {
+      // Wired in main via app.setLoginItemSettings; kept for interface parity.
     },
     secrets,
   };
