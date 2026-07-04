@@ -107,6 +107,11 @@ const SetWindowPos = user32.func("__stdcall", "SetWindowPos", "int", [
 const IsWindow = user32.func("__stdcall", "IsWindow", "int", ["int64"]);
 const IsWindowVisible = user32.func("__stdcall", "IsWindowVisible", "int", ["int64"]);
 const GetParent = user32.func("__stdcall", "GetParent", "int64", ["int64"]);
+// GetAncestor returns the true parent regardless of WS_CHILD/WS_POPUP style,
+// unlike GetParent which returns the *owner* (often 0) for top-level windows.
+// GA_PARENT = 1, GA_ROOT = 2, GA_ROOTOWNER = 3.
+const GA_PARENT = 1;
+const GetAncestor = user32.func("__stdcall", "GetAncestor", "int64", ["int64", "uint32"]);
 
 // --- Helpers ---------------------------------------------------------------
 
@@ -122,17 +127,30 @@ function readHwnd(buf: Buffer): number {
 }
 
 /**
- * Discover the wallpaper-paint WorkerW: the NEXT sibling (of class "WorkerW")
- * after the top-level that contains SHELLDLL_DefView. Handles both the normal
- * case (SHELLDLL_DefView under Progman) and the slideshow case (moved into a
- * WorkerW).
+ * Discover the wallpaper-paint WorkerW.
+ *
+ * Primary strategy (inherited from weebp/Lively): EnumWindows finds the
+ * top-level containing SHELLDLL_DefView, then FindWindowExW grabs its NEXT
+ * WorkerW sibling in Z-order. This is the canonical pre-Win11 sequence.
+ *
+ * Fallback strategy (Win11): the primary fails because SHELLDLL_DefView's host
+ * and the wallpaper WorkerW are no longer guaranteed to be Z-order-adjacent
+ * siblings — a Win11 build can spin up dozens of WorkerW windows (IME,
+ * shell-internal) that break the "next sibling" assumption. When the primary
+ * finds nothing, fall back to enumerating ALL WorkerW top-levels and pick a
+ * VISIBLE one. Most WorkerW windows are hidden system windows; the wallpaper
+ * paint WorkerW is the visible one (it has to be — DWM composites onto it).
+ *
+ * Returns 0 if neither strategy finds a candidate.
  */
 function findWallpaperWorkerW(): number {
+  // --- Primary: SHELLDLL_DefView sibling approach (Win10 / classic Win11) ---
   let workerW = 0;
-
-  const callback = koffi.register((hwnd: number, _lParam: number): number => {
+  let defViewHost = 0; // the top-level hosting SHELLDLL_DefView
+  const primaryCb = koffi.register((hwnd: number, _lParam: number): number => {
     const shellView = FindWindowExW(hwnd, 0, "SHELLDLL_DefView", null);
     if (shellView !== 0) {
+      defViewHost = hwnd;
       const sibling = FindWindowExW(0, hwnd, "WorkerW", null);
       if (sibling !== 0) {
         workerW = sibling;
@@ -141,10 +159,34 @@ function findWallpaperWorkerW(): number {
     }
     return 1; // TRUE — continue
   }, koffi.pointer(EnumWindowsProc));
+  EnumWindows(primaryCb, 0);
+  koffi.unregister(primaryCb);
+  if (workerW !== 0) return workerW;
 
-  EnumWindows(callback, 0);
-  koffi.unregister(callback);
-  return workerW;
+  // --- Fallback (Win11 raised desktop): the primary fails when SHELLDLL_DefView's
+  // host and the paint WorkerW are not Z-order-adjacent siblings. After 0x052C,
+  // Progman moves SHELLDLL_DefView into a WorkerW; the paint target is that
+  // host's sibling. Enumerate visible WorkerW tops and pick the one that ISN'T
+  // the DefView host (the host holds icons; the sibling is the paint target).
+  const visibleWorkerWs: number[] = [];
+  const fallbackCb = koffi.register((hwnd: number): number => {
+    if (getClassName(hwnd) !== "WorkerW") return 1;
+    if (IsWindowVisible(hwnd) !== 0) visibleWorkerWs.push(hwnd);
+    return 1;
+  }, koffi.pointer(EnumWindowsProc));
+  EnumWindows(fallbackCb, 0);
+  koffi.unregister(fallbackCb);
+
+  if (defViewHost !== 0) {
+    const sibling = visibleWorkerWs.find((h) => h !== defViewHost);
+    if (sibling !== undefined) return sibling;
+  }
+  if (visibleWorkerWs.length === 0) return 0;
+  // DefView host unknown (0x052C didn't fire?) — take the first visible WorkerW.
+  console.warn(
+    `[win32] WorkerW fallback (no DefView host): using first of [${visibleWorkerWs.join(",")}]`,
+  );
+  return visibleWorkerWs[0]!;
 }
 
 // --- Public API ------------------------------------------------------------
@@ -225,7 +267,7 @@ const GW_OWNER = 0;
 // GetClassNameW(HWND, LPWSTR, int maxCount)
 const GetClassNameW = user32.func("__stdcall", "GetClassNameW", "int", [
   "int64",
-  koffi.out(koffi.array("uint16", 256)),
+  koffi.pointer(koffi.array("uint16", 256)),
   "int",
 ]);
 
@@ -251,7 +293,10 @@ export function inspectWindowState(hwndPtr: Buffer): WindowStateSnapshot {
     return { hwndValid: false, windowVisible: false, parentHwnd: 0, parentIsWorkerW: false };
   }
   const windowVisible = IsWindowVisible(hwnd) !== 0;
-  const parentHwnd = GetParent(hwnd);
+  // Use GetAncestor (true parent) instead of GetParent (returns owner for
+  // top-level windows — SetParent doesn't change WS_POPUP/WS_OVERLAPPED style,
+  // so GetParent keeps returning 0 even after a successful reparent).
+  const parentHwnd = GetAncestor(hwnd, GA_PARENT);
   const parentIsWorkerW = parentHwnd !== 0 && getClassName(parentHwnd) === "WorkerW";
   return { hwndValid, windowVisible, parentHwnd, parentIsWorkerW };
   // Note: GW_OWNER unused — kept conceptually; remove if lint complains.
