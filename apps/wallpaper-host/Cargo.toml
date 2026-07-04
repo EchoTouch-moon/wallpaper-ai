@@ -1,0 +1,27 @@
+[package]
+name = "wallpaper-host"
+version = "0.1.0"
+edition = "2021"
+description = "Native WebView2 wallpaper host for WallpaperAI"
+publish = false
+
+[[bin]]
+name = "wallpaper-host"
+path = "src/main.rs"
+
+[dependencies]
+tao = "0.35"
+wry = "0.55"
+# Pin windows to 0.61 to match the version tao + wry use internally.
+# A different version would compile a second copy and their HWND/LPARAM types
+# would be incompatible.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Gdi",
+] }
+anyhow = "1"
+mime_guess = "2"
+url = "2"
+clap = { version = "4", features = ["derive"] }
