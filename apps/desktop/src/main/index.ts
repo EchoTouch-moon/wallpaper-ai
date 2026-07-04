@@ -115,10 +115,11 @@ async function bootstrap(): Promise<void> {
     console.error(`[renderer] render-process-gone: ${details.reason}`);
   });
 
-  // Open DevTools in a detached window during dev, so renderer errors and the
-  // DOM are inspectable even though the wallpaper window itself is embedded
-  // behind desktop icons (where its own DevTools would be unreachable).
-  if (!app.isPackaged) {
+  // Open DevTools in a detached window only on explicit request. Auto-opening
+  // it every dev run adds a window that can interfere with Z-order observation
+  // and confuses the "did the wallpaper flash and disappear" diagnosis.
+  // Set WALLPAPER_DEVTOOLS=1 to enable.
+  if (!app.isPackaged && process.env["WALLPAPER_DEVTOOLS"] === "1") {
     window.webContents.openDevTools({ mode: "detach" });
   }
 
@@ -133,18 +134,15 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  // Force a repaint after embedding. Win32 SetParent into WorkerW can leave
-  // Electron's GPU compositor in a state where it stops presenting; nudging
-  // the window size and invalidating forces a fresh swap chain and repaint.
-  // Multiple strategies because the exact trigger varies by Windows/DWM build.
-  const w = window.getBounds().width;
-  const h = window.getBounds().height;
-  window.setBounds({ width: w + 1, height: h + 1 });
-  window.setBounds({ width: w, height: h });
-  // webContents.invalidate() forces the compositor to repaint.
-  window.webContents.invalidate();
-  window.webContents.setBackgroundThrottling(false);
-  console.log("[main] repaint triggered");
+  // NOTE: do NOT call setBounds / invalidate after embedding.
+  // Earlier phases added a post-embed "force repaint" (nudge bounds by 1px +
+  // invalidate) to work around a GPU swap-chain issue. P1.4's software
+  // rendering fixed the actual rendering, and the post-embed setBounds was
+  // the cause of the "triptych flashes then disappears" symptom: resizing a
+  // BrowserWindow after it has been reparented into WorkerW lets DWM push it
+  // into a hidden / bottom Z-order state. Once loadURL has painted and the
+  // WorkerW reparent is done, leave the window alone.
+  console.log("[main] embed complete, window left as-is");
 }
 
 // CRITICAL for the wallpaper-layer technique: disable GPU hardware
