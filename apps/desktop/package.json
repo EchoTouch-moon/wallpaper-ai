@@ -20,6 +20,11 @@
   "optionalDependencies": {
     "electron-as-wallpaper": "^2.0.3"
   },
+  "pnpm": {
+    "patchedDependencies": {
+      "electron-as-wallpaper@2.0.3": "patches/electron-as-wallpaper@2.0.3.patch"
+    }
+  },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^4.0.0",

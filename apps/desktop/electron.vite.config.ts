@@ -1,13 +1,25 @@
 import { resolve } from "node:path";
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
+
+// Modules that must stay external (resolved from node_modules at runtime, not
+// bundled). electron-vite's externalizeDepsPlugin() is unreliable with
+// electron-vite 5 + Electron 43 — it fails to externalize `electron`, so the
+// built main/preload end up `require`ing electron's install script (which
+// returns the binary path string, not the API). Declaring `external` explicitly
+// on each target fixes that and keeps native modules (electron-as-wallpaper,
+// bindings) resolvable at runtime.
+//
+// Ref: P1 Windows verification (error 3 & 5).
+const mainExternal = ["electron", "electron-as-wallpaper", "bindings"];
+const preloadExternal = ["electron"];
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, "src/main/index.ts") },
+        external: mainExternal,
       },
     },
     resolve: {
@@ -17,10 +29,10 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, "src/preload/index.ts") },
+        external: preloadExternal,
       },
     },
   },

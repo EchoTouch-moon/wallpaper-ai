@@ -1,4 +1,4 @@
-import { globalShortcut, screen } from "electron";
+import { globalShortcut, screen, type BrowserWindow } from "electron";
 import type { DesktopPlatform, DisplayInfo, SecretStore } from "../../shared/desktop-platform";
 
 /**
@@ -19,24 +19,25 @@ interface AttachOptions {
 }
 
 interface ElectronAsWallpaper {
-  attach(window: unknown, options?: AttachOptions): void;
-  detach(window: unknown): void;
+  attach(window: BrowserWindow, options?: AttachOptions): void;
+  detach(window: BrowserWindow): void;
   reset(): void;
 }
 
+// electron-as-wallpaper adds a `wallpaperState` field to BrowserWindow at
+// runtime after attach(); Electron's types already declare it as optional, so
+// we read it defensively without re-declaring the module.
+
 async function loadWallpaperLib(): Promise<ElectronAsWallpaper> {
   // Dynamic import: only resolves on Windows where the native addon was built.
-  // The string is intentionally not statically analyzable so bundlers don't
-  // try to include it on other platforms.
   const mod = (await import(
     /* webpackIgnore: true */ "electron-as-wallpaper"
-  )) as { attach: unknown; detach: unknown; reset: unknown };
-  return mod as unknown as ElectronAsWallpaper;
+  )) as unknown as ElectronAsWallpaper;
+  return mod;
 }
 
 export function createWin32Platform(): DesktopPlatform {
   let embedded = false;
-  let currentWindow: { getNativeWindowHandle(): Buffer } | null = null;
   let lib: ElectronAsWallpaper | null = null;
 
   const secrets: SecretStore = {
@@ -54,24 +55,24 @@ export function createWin32Platform(): DesktopPlatform {
   return {
     name: "win32",
     async embedToWallpaperLayer(window) {
-      if (!currentWindow) {
-        // Capture a minimal handle proxy so we don't keep a typed BrowserWindow
-        // dependency in this scope beyond what attach needs.
-        currentWindow = {
-          getNativeWindowHandle: () => window.getNativeWindowHandle(),
-        };
-      }
       if (!lib) {
         lib = await loadWallpaperLib();
       }
       try {
+        // transparent: true so the wallpaper layer can show the desktop behind
+        // any unrendered regions. Mouse/keyboard forwarding left off in P1 —
+        // the wallpaper layer is click-through by default (setIgnoreMouseEvents).
         lib.attach(window, {
-          transparent: false,
+          transparent: true,
           forwardKeyboardInput: false,
           forwardMouseInput: false,
         });
-        embedded = true;
-        return true;
+        // Verify via the runtime-added wallpaperState. The library sets this on
+        // the BrowserWindow after a successful attach(); if it's missing or
+        // false, treat the embed as failed so the caller can fall back.
+        const attached = window.wallpaperState?.isAttached === true;
+        embedded = attached;
+        return attached;
       } catch (error) {
         console.error("[win32] attach failed:", error);
         embedded = false;
@@ -95,8 +96,7 @@ export function createWin32Platform(): DesktopPlatform {
       }));
     },
     async setAutoLaunch(enable) {
-      // Set in main/index.ts via app.setLoginItemSettings to keep this pure.
-      // Placeholder kept on the interface for symmetry.
+      // Wired in main via app.setLoginItemSettings; kept here for interface parity.
       void enable;
     },
     secrets,
