@@ -100,6 +100,12 @@ const SetWindowPos = user32.func("__stdcall", "SetWindowPos", "int", [
   "uint32", // uFlags
 ]);
 
+// --- Diagnostics (for the P1.7 watchdog: is the window still parented and visible?) ---
+
+const IsWindow = user32.func("__stdcall", "IsWindow", "int", ["int64"]);
+const IsWindowVisible = user32.func("__stdcall", "IsWindowVisible", "int", ["int64"]);
+const GetParent = user32.func("__stdcall", "GetParent", "int64", ["int64"]);
+
 // --- Helpers ---------------------------------------------------------------
 
 /** Read an Electron BrowserWindow's HWND from its native handle Buffer. */
@@ -200,4 +206,74 @@ export function embedToDesktop(
   );
 
   return true;
+}
+
+/**
+ * Snapshot of the wallpaper window's state for the guardian watchdog.
+ * Every field is a concrete observable so logs tell us exactly what changed.
+ */
+export interface WindowStateSnapshot {
+  hwndValid: boolean; // IsWindow(hwnd)
+  windowVisible: boolean; // IsWindowVisible(hwnd) — has WS_VISIBLE
+  parentHwnd: number; // GetParent(hwnd) — should be the WorkerW
+  parentIsWorkerW: boolean; // true if parent class == "WorkerW"
+}
+
+const GW_OWNER = 0;
+// GetClassNameW(HWND, LPWSTR, int maxCount)
+const GetClassNameW = user32.func("__stdcall", "GetClassNameW", "int", [
+  "int64",
+  koffi.out(koffi.array("uint16", 256)),
+  "int",
+]);
+
+/** Read a window's class name (e.g. "WorkerW", "Progman"). */
+function getClassName(hwnd: number): string {
+  const buf = new Uint16Array(256);
+  const r = GetClassNameW(hwnd, buf, 256);
+  if (r <= 0) return "";
+  let s = "";
+  for (let i = 0; i < r; i++) s += String.fromCharCode(buf[i]);
+  return s;
+}
+
+/**
+ * Inspect the wallpaper window's current Win32 state. The guardian calls
+ * this every few seconds and logs changes; if the window got detached from
+ * WorkerW (Explorer rebuilt it) or hidden, we re-embed.
+ */
+export function inspectWindowState(hwndPtr: Buffer): WindowStateSnapshot {
+  const hwnd = readHwnd(hwndPtr);
+  const hwndValid = IsWindow(hwnd) !== 0;
+  if (!hwndValid) {
+    return { hwndValid: false, windowVisible: false, parentHwnd: 0, parentIsWorkerW: false };
+  }
+  const windowVisible = IsWindowVisible(hwnd) !== 0;
+  const parentHwnd = GetParent(hwnd);
+  const parentIsWorkerW = parentHwnd !== 0 && getClassName(parentHwnd) === "WorkerW";
+  return { hwndValid, windowVisible, parentHwnd, parentIsWorkerW };
+  // Note: GW_OWNER unused — kept conceptually; remove if lint complains.
+  void GW_OWNER;
+}
+
+/**
+ * Re-assert the wallpaper window's position at the bottom of WorkerW's
+ * Z-order without re-parenting. The guardian calls this when the window is
+ * still parented correctly but may have been pushed up in Z-order.
+ */
+export function reassertBottomZOrder(
+  hwndPtr: Buffer,
+  bounds: { x: number; y: number; width: number; height: number },
+): void {
+  const hwnd = readHwnd(hwndPtr);
+  if (IsWindow(hwnd) === 0) return;
+  SetWindowPos(
+    hwnd,
+    HWND_BOTTOM,
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    SWP_NOACTIVATE,
+  );
 }

@@ -122,6 +122,24 @@ async function bootstrap(): Promise<void> {
     console.error(`[renderer] render-process-gone: ${details.reason}`);
   });
 
+  // P1.7: log EVERY window/webContents lifecycle event with timestamps so the
+  // "disappears on startup complete" symptom can be pinpointed to the exact
+  // event that causes it. Look for the moment the triptych vanishes and match
+  // it to the nearest log line.
+  const ts = () => new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+  // Electron's BrowserWindow.on() has many overloads; cast through unknown so
+  // a dynamic event name resolves without TS overload errors.
+  const winOn = window.on.bind(window) as (ev: string, fn: () => void) => void;
+  ["show", "hide", "minimize", "restore", "resize", "blur", "focus", "close"].forEach((ev) =>
+    winOn(ev, () => console.log(`[win:${ev}] @${ts()}`)),
+  );
+  window.webContents.on("did-start-navigation", (_e, url, isInPlace, isMainFrame) =>
+    console.log(`[wc:did-start-navigation] @${ts()} main=${isMainFrame} inplace=${isInPlace} ${url}`),
+  );
+  window.webContents.on("did-frame-finish-load", () => console.log(`[wc:did-frame-finish-load] @${ts()}`));
+  window.webContents.on("did-finish-load", () => console.log(`[wc:did-finish-load] @${ts()}`));
+  window.webContents.on("dom-ready", () => console.log(`[wc:dom-ready] @${ts()}`));
+
   // Open DevTools in a detached window only on explicit request. Auto-opening
   // it every dev run adds a window that can interfere with Z-order observation
   // and confuses the "did the wallpaper flash and disappear" diagnosis.
@@ -152,16 +170,23 @@ async function bootstrap(): Promise<void> {
   // (focusable:false + SWP_NOACTIVATE), so even with backgroundThrottling
   // disabled at the webPreferences level, some Windows/DWM builds still let
   // Chromium's software-renderer release its paint target after the window
-  // stays backgrounded for a while — the window turns solid white.
-  // invalidate() forces the compositor to repaint without touching geometry,
-  // so it doesn't trigger the Z-order issue that setBounds does. Run it on a
-  // slow interval (every 30s) as a low-cost keepalive.
-  setInterval(() => {
-    if (!window.isDestroyed()) {
-      window.webContents.invalidate();
+  // P1.7 watchdog: run every 5s. Inspects the wallpaper window's Win32 state
+  // (is it still parented into WorkerW? still visible?), re-embeds if Explorer
+  // rebuilt the desktop, re-asserts Z-order, and forces a repaint. The previous
+  // 30s invalidate-only heartbeat couldn't react to the "disappears on startup
+  // complete" symptom because the window's Win32 state changed faster than 30s
+  // could repair. Each tick logs a one-line snapshot so we can see exactly when
+  // and how the state breaks.
+  setInterval(async () => {
+    if (window.isDestroyed()) return;
+    window.webContents.invalidate();
+    if (platform.name === "win32") {
+      const { guardianTick } = await import("./platform/win32");
+      const snap = await guardianTick();
+      console.log(`[guardian] ${snap}`);
     }
-  }, 30_000);
-  console.log("[main] keepalive heartbeat armed (30s)");
+  }, 5_000);
+  console.log("[main] guardian watchdog armed (5s)");
 }
 
 // CRITICAL for the wallpaper-layer technique: disable GPU hardware
