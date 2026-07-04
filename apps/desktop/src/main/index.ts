@@ -85,12 +85,24 @@ async function bootstrap(): Promise<void> {
 
   const window = createWallpaperWindow();
 
-  // Show the window BEFORE embedding: electron-as-wallpaper's attach() needs a
-  // valid HWND, and a hidden window's handle can be invalid for reparenting.
-  // (P1 Windows verification, error 6 timing.)
+  // Show the window BEFORE embedding: attach() needs a valid HWND, and a
+  // hidden window's handle can be invalid for reparenting.
   window.show();
 
-  console.log("[main] window shown, now attempting wallpaper-layer embed...");
+  // Load the renderer BEFORE embedding. Counter to the earlier ordering, this
+  // lets the GPU compositor start presenting while the window is still a
+  // normal top-level window. Reparenting via Win32 SetParent after the
+  // compositor is already running is more reliable than loading into an
+  // already-reparented window (where the swap chain may not initialize).
+  const devUrl = process.env["ELECTRON_RENDERER_URL"];
+  console.log("[main] loading renderer...");
+  if (devUrl) {
+    await window.loadURL(devUrl);
+  } else {
+    await window.loadFile(join(__dirname, "../renderer/index.html"));
+  }
+  console.log("[main] renderer loaded, now embedding into wallpaper layer...");
+
   const embedded = await platform.embedToWallpaperLayer(window);
   if (embedded) {
     console.log(`[main] embedded into wallpaper layer (${platform.name})`);
@@ -100,20 +112,18 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  // Load renderer AFTER embedding so first paint happens in the right layer.
-  // Dev: electron-vite injects ELECTRON_RENDERER_URL; prod: load built file.
-  const devUrl = process.env["ELECTRON_RENDERER_URL"];
-  if (devUrl) {
-    await window.loadURL(devUrl);
-  } else {
-    await window.loadFile(join(__dirname, "../renderer/index.html"));
-  }
-
-  // No setIgnoreMouseEvents: with correct WorkerW reparenting, clicks on
-  // desktop icons reach the icons automatically (icons live in
-  // SHELLDLL_DefView, a sibling above our WorkerW child). Clicks on empty
-  // desktop area land on the wallpaper layer, which is the desired behavior
-  // (lets us implement interactive slots later without mouse-passthrough).
+  // Force a repaint after embedding. Win32 SetParent into WorkerW can leave
+  // Electron's GPU compositor in a state where it stops presenting; nudging
+  // the window size and invalidating forces a fresh swap chain and repaint.
+  // Multiple strategies because the exact trigger varies by Windows/DWM build.
+  const w = window.getBounds().width;
+  const h = window.getBounds().height;
+  window.setBounds({ width: w + 1, height: h + 1 });
+  window.setBounds({ width: w, height: h });
+  // webContents.invalidate() forces the compositor to repaint.
+  window.webContents.invalidate();
+  window.webContents.setBackgroundThrottling(false);
+  console.log("[main] repaint triggered");
 }
 
 // Single instance lock — second launches focus the existing app instead.

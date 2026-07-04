@@ -49,15 +49,15 @@ const WM_SPAWN_WORKERW = 0x052c; // undocumented; makes Progman spawn WorkerW
 const user32 = koffi.load("user32.dll");
 
 const FindWindowW = user32.func("__stdcall", "FindWindowW", "int64", [
-  "wstr",
-  "wstr",
+  "wstring",
+  "wstring",
 ]);
 
 const FindWindowExW = user32.func(
   "__stdcall",
   "FindWindowExW",
   "int64",
-  ["int64", "int64", "wstr", "wstr"],
+  ["int64", "int64", "wstring", "wstring"],
 );
 
 const SendMessageTimeoutW = user32.func(
@@ -132,7 +132,7 @@ function findWallpaperWorkerW(): number {
       }
     }
     return 1; // TRUE — continue
-  }, EnumWindowsProc);
+  }, koffi.pointer(EnumWindowsProc));
 
   EnumWindows(callback, 0);
   koffi.unregister(callback);

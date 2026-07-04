@@ -9,8 +9,9 @@ import react from "@vitejs/plugin-react";
 // returns the binary path string, not the API). Declaring `external` explicitly
 // on each target fixes that. koffi is bundled (pure JS, no native deps).
 //
-// Ref: P1 Windows verification (error 3 & 5).
-const mainExternal = ["electron"];
+// Ref: P1 Windows verification (error 3 & 5); koffi external per P1.2 (require
+// identifier clash between electron-vite's CJS shim and koffi's bundled code).
+const mainExternal = ["electron", "koffi"];
 const preloadExternal = ["electron"];
 
 export default defineConfig({

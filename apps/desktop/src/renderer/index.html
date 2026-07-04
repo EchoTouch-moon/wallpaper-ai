@@ -2,6 +2,38 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Diagnostic splash: inline CSS that paints IMMEDIATELY, before any JS or
+      React mount. If you see this solid magenta background, the renderer
+      process IS painting and the window is visible — the triptych problem is
+      then a React/CSS issue. If you see the user's wallpaper through the
+      window instead, the renderer is NOT painting (GPU compositor broken by
+      Win32 SetParent reparenting — the likely P1.3 root cause).
+    -->
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        /* Opaque magenta so it's unmistakable against any desktop wallpaper.
+           Once triptych renders correctly we restore transparent. */
+        background: #ff00ff;
+      }
+      #boot-badge {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        font-family: monospace;
+        color: #fff;
+        background: #000;
+        padding: 6px 10px;
+        font-size: 13px;
+        z-index: 9999;
+      }
+    </style>
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
@@ -9,6 +41,7 @@
     <title>WallpaperAI</title>
   </head>
   <body>
+    <div id="boot-badge">HTML loaded — waiting for React…</div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
