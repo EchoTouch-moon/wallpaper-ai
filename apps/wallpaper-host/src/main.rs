@@ -86,6 +86,9 @@ fn main() -> anyhow::Result<()> {
     // "creation-time parent" route caused E_INVALIDARG and is not what we test
     // here. Reparent (when used) happens AFTER WebView2 creation.
     let event_loop = EventLoop::new();
+    // Size the window to the actual primary monitor (physical px), not a
+    // hardcoded 1920x1080 — that clips on displays with different resolution.
+    let (screen_w, screen_h) = primary_screen_size();
     let builder = WindowBuilder::new()
         .with_title("WallpaperAI")
         .with_decorations(false)
@@ -97,7 +100,11 @@ fn main() -> anyhow::Result<()> {
         // NO_REDIRECTION_BITMAP false: ensure a normal redirectable surface.
         .with_no_redirection_bitmap(false)
         .with_skip_taskbar(true)
-        .with_inner_size(tao::dpi::LogicalSize::new(1920f64, 1080f64));
+        .with_inner_size(tao::dpi::PhysicalSize::new(
+            screen_w as f64,
+            screen_h as f64,
+        ));
+    println!("[host] primary screen = {}x{} px", screen_w, screen_h);
 
     let window = builder.build(&event_loop)?;
     window.set_visible(true);
@@ -193,10 +200,9 @@ fn do_reparent(
     mode: Mode,
     webview: &wry::WebView,
 ) -> anyhow::Result<()> {
-    use tao::dpi::{LogicalPosition, LogicalSize};
     use windows::Win32::Foundation::{GetLastError, SetLastError, HWND};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, GetWindowRect, SetParent, SetWindowLongPtrW, SetWindowPos, HWND_BOTTOM,
+        GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, HWND_BOTTOM,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_LONG_PTR_INDEX, WS_CHILD,
         WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
         WS_POPUP,
@@ -233,10 +239,11 @@ fn do_reparent(
             }
         }
 
-        let mut rect = windows::Win32::Foundation::RECT::default();
-        let _ = GetWindowRect(target.parent, &mut rect);
-        let w = rect.right - rect.left;
-        let h = rect.bottom - rect.top;
+        // Use primary screen size (SM_CXSCREEN/SM_CYSCREEN), NOT the parent
+        // WorkerW's GetWindowRect — the WorkerW rect can include virtual-display
+        // extension (e.g. 2560x1600 when the real screen is 1707x1067), which
+        // makes the wallpaper overflow and clip.
+        let (w, h) = primary_screen_size();
         let _ = SetWindowPos(
             hwnd,
             Some(HWND_BOTTOM),
@@ -249,11 +256,14 @@ fn do_reparent(
         println!("[reparent] SetWindowPos HWND_BOTTOM {}x{}", w, h);
     }
 
+    // Sync webview bounds to the screen size (physical px), matching the
+    // window size set above. Previously hardcoded 1920x1080 which clipped.
+    let (sw, sh) = primary_screen_size();
     let _ = webview.set_bounds(wry::Rect {
-        position: LogicalPosition::new(0.0, 0.0).into(),
-        size: LogicalSize::new(1920.0, 1080.0).into(),
+        position: tao::dpi::PhysicalPosition::new(0.0, 0.0).into(),
+        size: tao::dpi::PhysicalSize::new(sw as f64, sh as f64).into(),
     });
-    println!("[reparent] webview.set_bounds called");
+    println!("[reparent] webview.set_bounds {}x{}", sw, sh);
 
     log_window_state(hwnd_isize(hwnd), "after reparent");
     println!("[reparent] mode={:?} done", mode);
@@ -331,6 +341,20 @@ fn class_name(hwnd: windows::Win32::Foundation::HWND) -> String {
     unsafe { GetClassNameW(hwnd, &mut buf) };
     let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16_lossy(&buf[..len])
+}
+
+/// Primary monitor size in physical pixels via GetSystemMetrics.
+/// SM_CXSCREEN=0, SM_CYSCREEN=1. This is the actual display resolution
+/// (e.g. 1707x1067 on this machine), NOT the WorkerW rect (which may include
+/// virtual-display extension). Used for both window creation and webview bounds
+/// so the renderer fills the screen exactly with no clipping.
+fn primary_screen_size() -> (i32, i32) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SYSTEM_METRICS_INDEX};
+    const SM_CXSCREEN: SYSTEM_METRICS_INDEX = SYSTEM_METRICS_INDEX(0);
+    const SM_CYSCREEN: SYSTEM_METRICS_INDEX = SYSTEM_METRICS_INDEX(1);
+    let w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    (w, h)
 }
 
 /// Minimal guardian: healthy path is a no-op.
