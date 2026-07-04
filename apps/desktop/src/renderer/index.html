@@ -41,6 +41,14 @@
     <title>WallpaperAI</title>
   </head>
   <body>
+    <!-- Plain text that shows even if CSS and JS both fail. If you don't see
+         this on the desktop, the page content isn't reaching the screen at
+         all (GPU compositor / reparent issue), not a React/CSS issue. -->
+    <h1 style="
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      color: #fff; font-family: sans-serif; font-size: 48px; z-index: 9998;
+      margin: 0; text-shadow: 0 2px 8px #000;
+    ">WALLPAPER-AI RENDERER</h1>
     <div id="boot-badge">HTML loaded — waiting for React…</div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

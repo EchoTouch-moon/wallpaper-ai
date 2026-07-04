@@ -101,6 +101,27 @@ async function bootstrap(): Promise<void> {
   } else {
     await window.loadFile(join(__dirname, "../renderer/index.html"));
   }
+
+  // Forward ALL renderer console messages and load failures to the main
+  // process stdout. The wallpaper window has no visible DevTools by default,
+  // so this is how we see renderer-side errors during Windows verification.
+  window.webContents.on("console-message", (_e, level, message, line, source) => {
+    console.log(`[renderer:${["log", "warn", "error"][level] ?? "log"}] ${message} (${source}:${line})`);
+  });
+  window.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    console.error(`[renderer] did-fail-load ${code} ${desc} — ${url}`);
+  });
+  window.webContents.on("render-process-gone", (_e, details) => {
+    console.error(`[renderer] render-process-gone: ${details.reason}`);
+  });
+
+  // Open DevTools in a detached window during dev, so renderer errors and the
+  // DOM are inspectable even though the wallpaper window itself is embedded
+  // behind desktop icons (where its own DevTools would be unreachable).
+  if (!app.isPackaged) {
+    window.webContents.openDevTools({ mode: "detach" });
+  }
+
   console.log("[main] renderer loaded, now embedding into wallpaper layer...");
 
   const embedded = await platform.embedToWallpaperLayer(window);
@@ -125,6 +146,22 @@ async function bootstrap(): Promise<void> {
   window.webContents.setBackgroundThrottling(false);
   console.log("[main] repaint triggered");
 }
+
+// CRITICAL for the wallpaper-layer technique: disable GPU hardware
+// acceleration. Chromium's GPU compositor binds a Direct3D swap chain to the
+// window's HWND and its position in the window tree. When Win32 SetParent
+// reparents the BrowserWindow into WorkerW (a window owned by explorer.exe),
+// that swap chain is invalidated and Chromium never rebuilds it — so the web
+// content stops presenting and only the window's native grey background shows.
+//
+// Software rendering (CPU) doesn't use a GPU swap chain, so reparenting
+// doesn't break presentation. This is the same mode used by kiosk/digital-
+// signage Electron apps that embed windows in unusual parents. Performance is
+// fine for a static-ish wallpaper (no full-screen video).
+//
+// This MUST be called before app.whenReady().
+app.disableHardwareAcceleration();
+console.log("[main] hardware acceleration disabled (software render mode)");
 
 // Single instance lock — second launches focus the existing app instead.
 if (!app.requestSingleInstanceLock()) {
