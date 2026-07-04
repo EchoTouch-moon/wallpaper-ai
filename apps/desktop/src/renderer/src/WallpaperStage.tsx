@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getTemplate, type TemplateSlot } from "@wallpaper/core/layout";
+import { wallpaperHost } from "./wallpaper-host";
 
 /**
  * P1 wallpaper stage: renders the canonical `triptych_desktop_equal` template
@@ -34,7 +35,7 @@ function usePlatformInfo(): PlatformInfo | null {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const api = window.wallpaper;
+      const api = wallpaperHost;
       const [name, embedded, displays] = await Promise.all([
         api.getPlatformName(),
         api.isEmbedded(),

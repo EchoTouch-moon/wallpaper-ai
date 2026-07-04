@@ -38,6 +38,9 @@ export default defineConfig({
   },
   renderer: {
     root: "src/renderer",
+    // Keep renderer assets relative so the same static bundle works both with
+    // Electron's loadFile() and inside an Octos/WebView2 wallpaper package.
+    base: "./",
     resolve: {
       alias: {
         "@renderer": resolve(__dirname, "src/renderer/src"),

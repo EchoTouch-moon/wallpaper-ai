@@ -1,0 +1,8 @@
+{
+  "name": "WallpaperAI Renderer Validation",
+  "author": "WallpaperAI",
+  "description": "WebView2 ground-truth package for the WallpaperAI triptych renderer.",
+  "entry": "index.html",
+  "source": "https://github.com/EchoTouch-moon/wallpaper-ai",
+  "version": "0.1.0"
+}

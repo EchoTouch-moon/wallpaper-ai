@@ -9,6 +9,8 @@
     "dev": "electron-vite dev",
     "dev:mock": "cross-env WALLPAPER_PLATFORM=mock electron-vite dev",
     "build": "electron-vite build",
+    "build:octos": "pnpm build && node scripts/package-octos.mjs",
+    "package:octos": "node scripts/package-octos.mjs",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:win": "pnpm build && electron-builder --win",

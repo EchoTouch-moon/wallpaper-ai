@@ -1,10 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { WallpaperApi } from "../shared/wallpaper-api";
 
 /**
  * Surface exposed to the wallpaper renderer under `window.wallpaper`.
  * Kept intentionally minimal for P1; grows in P2 (swap engine) and beyond.
  */
-const wallpaper = {
+const wallpaper: WallpaperApi = {
   getPlatformName: (): Promise<string> => ipcRenderer.invoke("platform:name"),
   isEmbedded: (): Promise<boolean> => ipcRenderer.invoke("platform:embedded"),
   getDisplays: () => ipcRenderer.invoke("platform:displays"),
@@ -25,4 +26,4 @@ if (process.contextIsolated) {
   window.wallpaper = wallpaper;
 }
 
-export type WallpaperApi = typeof wallpaper;
+export type { WallpaperApi } from "../shared/wallpaper-api";
