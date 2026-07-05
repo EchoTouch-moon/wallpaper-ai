@@ -92,6 +92,11 @@ fn main() -> anyhow::Result<()> {
     let builder = WindowBuilder::new()
         .with_title("WallpaperAI")
         .with_decorations(false)
+        // tao default: decoration_shadow=true. On a frameless window this draws a
+        // ~11px resize/snap border (the source of the (11,2) WRY_WEBVIEW offset).
+        // Explicitly disable it. Per Codex verdict this must be tried before any
+        // custom WM_NCCALCSIZE subclass.
+        .with_undecorated_shadow(false)
         .with_resizable(false)
         .with_minimizable(false)
         .with_maximizable(false)
@@ -110,20 +115,12 @@ fn main() -> anyhow::Result<()> {
     window.set_visible(true);
     let hwnd = window.hwnd();
     println!(
-        "[host] top-level window created + visible; hwnd = 0x{:x}",
-        hwnd
+        "[host] top-level window created + visible; hwnd = 0x{:x}; undecorated_shadow={}",
+        hwnd,
+        window.has_undecorated_shadow()
     );
     log_window_state(hwnd, "after create");
-
-    // Strip WS_CAPTION/WS_THICKFRAME/WS_SYSMENU NOW (before WebView2 creation)
-    // and force a frame change. tao's with_decorations(false) does NOT remove
-    // these styles on Windows — the window is born with WS_CAPTION, which gives
-    // it ~11px non-client insets at DPI 1.5x. If we leave them, WRY_WEBVIEW
-    // anchors at client (0,0) = screen (11,2), producing the off-center gap.
-    // Clearing here + SWP_FRAMECHANGED makes the whole window rect client area,
-    // so children anchor at screen (0,0).
-    strip_non_client(hwnd);
-    log_window_state(hwnd, "after strip_non_client");
+    log_full_geometry(hwnd, "after create (full geom)");
 
     // A0 critical: do NOT touch styles before WebView2 creation. No WS_CHILD,
     // no WS_EX_LAYERED, no WS_EX_TRANSPARENT, no SetLayeredWindowAttributes.
@@ -214,9 +211,6 @@ fn do_reparent(
     webview: &wry::WebView,
 ) -> anyhow::Result<()> {
     use windows::Win32::Foundation::{GetLastError, SetLastError, HWND};
-    use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMNCRENDERINGPOLICY, DWMWA_NCRENDERING_POLICY,
-    };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, HWND_BOTTOM,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_LONG_PTR_INDEX, WS_CAPTION,
@@ -284,20 +278,6 @@ fn do_reparent(
         );
         println!("[reparent] SetWindowPos HWND_BOTTOM {}x{}", w, h);
 
-        // Tell DWM NOT to render any non-client area for this window. Even with
-        // WS_CAPTION/WS_THICKFRAME cleared, Win11 DWM adds a hidden ~11px resize
-        // border (for snap gestures) that shrinks client area below the window
-        // size. DWMWA_NCRENDERING_POLICY=DWMNCRP_DISABLED makes the entire window
-        // rect usable as client area, eliminating the 22x13px letterbox.
-        let policy = DWMNCRENDERINGPOLICY(2); // DWMNCRP_DISABLED
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_NCRENDERING_POLICY,
-            &policy as *const _ as *const _,
-            std::mem::size_of::<DWMNCRENDERINGPOLICY>() as u32,
-        );
-        println!("[reparent] DWM NC rendering disabled");
-
         // Verify final client area matches what we asked for. Per spec: use
         // the host WorkerW's GetClientRect to confirm the target paint surface.
         let mut client = windows::Win32::Foundation::RECT::default();
@@ -338,6 +318,7 @@ fn do_reparent(
 
     log_window_state(hwnd_isize(hwnd), "after reparent");
     println!("[reparent] mode={:?} done", mode);
+    log_full_geometry(hwnd_isize(hwnd), "after reparent (full geom)");
     Ok(())
 }
 
@@ -436,41 +417,6 @@ fn class_name(hwnd: windows::Win32::Foundation::HWND) -> String {
 /// styles in place on Windows, giving the window ~11px insets at DPI 1.5x that
 /// offset WRY_WEBVIEW from (0,0). Must be called before WebView2 creation so
 /// the webview anchors at the true client origin.
-fn strip_non_client(hwnd_isize: isize) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_MAXIMIZEBOX,
-        WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
-    };
-    const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
-    let hwnd = HWND(hwnd_isize as _);
-    unsafe {
-        let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
-        let clear = WS_CAPTION.0
-            | WS_THICKFRAME.0
-            | WS_SYSMENU.0
-            | WS_MINIMIZEBOX.0
-            | WS_MAXIMIZEBOX.0
-            | WS_POPUP.0;
-        let new_style = style & !clear;
-        SetWindowLongPtrW(hwnd, GWLP_STYLE_IDX, new_style as isize);
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
-        );
-        println!(
-            "[strip_non_client] GWL_STYLE 0x{:x} -> 0x{:x}",
-            style, new_style
-        );
-    }
-}
-
 fn primary_screen_size() -> (i32, i32) {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SYSTEM_METRICS_INDEX};
     const SM_CXSCREEN: SYSTEM_METRICS_INDEX = SYSTEM_METRICS_INDEX(0);
@@ -492,6 +438,84 @@ fn dpi_for_hwnd(hwnd_isize: isize) -> u32 {
         96
     } else {
         dpi
+    }
+}
+
+/// Full geometry diagnostic per Codex verdict §2. Records the 6 rect sources +
+/// DPI awareness context so the (11,2) offset can be attributed to the right
+/// layer (window rect / client rect / DWM extended bounds / DPI virtualization).
+fn log_full_geometry(hwnd_isize: isize, label: &str) {
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::HiDpi::{
+        AreDpiAwarenessContextsEqual, GetWindowDpiAwarenessContext,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE,
+        DPI_AWARENESS_CONTEXT_UNAWARE,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+
+    let hwnd = HWND(hwnd_isize as _);
+    println!("[geom {}] hwnd=0x{:x}", label, hwnd_isize);
+
+    unsafe {
+        // 1. GetWindowRect (may be DPI-virtualized)
+        let mut wr = RECT::default();
+        if GetWindowRect(hwnd, &mut wr).is_ok() {
+            println!(
+                "  GetWindowRect       = {},{} {}x{}",
+                wr.left,
+                wr.top,
+                wr.right - wr.left,
+                wr.bottom - wr.top
+            );
+        }
+        // 2. GetClientRect
+        let mut cr = RECT::default();
+        if GetClientRect(hwnd, &mut cr).is_ok() {
+            println!(
+                "  GetClientRect       = {}x{}",
+                cr.right - cr.left,
+                cr.bottom - cr.top
+            );
+        }
+        // 3. ClientToScreen(0,0) — where does client origin sit on screen?
+        let mut origin = POINT { x: 0, y: 0 };
+        if ClientToScreen(hwnd, &mut origin).as_bool() {
+            println!("  ClientToScreen(0,0) = {},{}", origin.x, origin.y);
+        }
+        // 4. DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS) — DWM's true bounds
+        let mut ext = RECT::default();
+        let _ = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut ext as *mut _ as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        );
+        println!(
+            "  DWMWA_EXTENDED_FRAME_BOUNDS = {},{} {}x{}",
+            ext.left,
+            ext.top,
+            ext.right - ext.left,
+            ext.bottom - ext.top
+        );
+        // 5. DPI
+        let dpi = dpi_for_hwnd(hwnd_isize);
+        println!("  DPI = {} (scale {:.2}x)", dpi, dpi as f64 / 96.0);
+        // 6. DPI awareness context
+        let ctx = GetWindowDpiAwarenessContext(hwnd);
+        let aware = if AreDpiAwarenessContextsEqual(ctx, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+            .as_bool()
+        {
+            "PER_MONITOR_V2"
+        } else if AreDpiAwarenessContextsEqual(ctx, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE).as_bool() {
+            "SYSTEM_AWARE"
+        } else if AreDpiAwarenessContextsEqual(ctx, DPI_AWARENESS_CONTEXT_UNAWARE).as_bool() {
+            "UNAWARE"
+        } else {
+            "OTHER"
+        };
+        println!("  DPI awareness = {}", aware);
     }
 }
 
