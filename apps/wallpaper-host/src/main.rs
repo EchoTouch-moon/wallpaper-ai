@@ -59,8 +59,8 @@ struct Args {
     #[arg(long, value_enum, default_value_t = Mode::TopLevel)]
     mode: Mode,
 
-    /// Poll interval for the guardian watchdog, in milliseconds.
-    #[arg(long, default_value_t = 500)]
+    /// Watchdog interval for the guardian tick, in milliseconds (min 50).
+    #[arg(long, default_value_t = 500, value_parser = clap::value_parser!(u64).range(50..))]
     guardian_interval_ms: u64,
 }
 
@@ -205,16 +205,25 @@ fn run_event_loop(
             Event::MainEventsCleared => {
                 let now = Instant::now();
 
-                // One-shot reparent.
+                // One-shot reparent. Only consume the one-shot on full success;
+                // on failure reschedule +1s so it retries (proper backoff lands
+                // with the recovery state machine).
                 if let Some(deadline) = reparent_at {
                     if now >= deadline {
                         let t0 = Instant::now();
-                        let _ = do_reparent(hwnd, &target, mode, &webview);
-                        println!(
-                            "[trace] reparent fired at {:?} (scheduled at start+{:?})",
-                            t0, REPARENT_DELAY
-                        );
-                        reparent_at = None; // remove from min-deadline calc
+                        match do_reparent(hwnd, &target, mode, &webview) {
+                            Ok(()) => {
+                                println!(
+                                    "[trace] reparent fired at {:?} (scheduled at start+{:?}) — OK",
+                                    t0, REPARENT_DELAY
+                                );
+                                reparent_at = None; // consume one-shot
+                            }
+                            Err(e) => {
+                                eprintln!("[trace] reparent failed: {} — retry in 1s", e);
+                                reparent_at = Some(now + Duration::from_secs(1));
+                            }
+                        }
                     }
                 }
 
@@ -280,6 +289,7 @@ fn do_reparent(
     println!("[reparent] mode={:?} starting", mode);
     log_window_state(hwnd, "before reparent");
 
+    let hwnd_isize = hwnd; // keep isize copy for post-unsafe-block logging
     let hwnd = HWND(hwnd as _);
     unsafe {
         // GWL_STYLE: clear ALL non-client-area styles (caption/sysmenu/thickframe
@@ -308,79 +318,83 @@ fn do_reparent(
         SetWindowLongPtrW(hwnd, GWLP_EXSTYLE_IDX, new_ex as isize);
         println!("[reparent] GWL_EXSTYLE 0x{:x} -> 0x{:x}", ex, new_ex);
 
-        // SetParent with proper error checking. windows 0.61: returns Result<HWND>.
+        // SetParent — propagate errors instead of swallowing. windows 0.61
+        // returns Result<HWND>; on Err the attach must NOT be marked successful.
         SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
-        match SetParent(hwnd, Some(target.parent)) {
-            Ok(prev) => println!("[reparent] SetParent OK; prev parent = {:?}", prev),
-            Err(e) => {
-                let le = GetLastError();
-                eprintln!("[reparent] SetParent err: {} (GetLastError={:?})", e, le);
-            }
-        }
+        let prev = SetParent(hwnd, Some(target.parent)).map_err(|e| {
+            let le = GetLastError();
+            anyhow::anyhow!("SetParent failed: {} (GetLastError={:?})", e, le)
+        })?;
+        println!("[reparent] SetParent OK; prev parent = {:?}", prev);
 
-        // Use primary screen size (SM_CXSCREEN/SM_CYSCREEN), NOT the parent
-        // WorkerW's GetWindowRect — the WorkerW rect can include virtual-display
-        // extension (e.g. 2560x1600 when the real screen is 1707x1067), which
-        // makes the wallpaper overflow and clip.
-        let (w, h) = primary_screen_size();
-        let _ = SetWindowPos(
+        // Size the window to cover the parent WorkerW's client rect. Use
+        // GetClientRect(parent) — NOT primary_screen_size() — so the wallpaper
+        // always服从 the actual paint target (matters for multi-monitor,
+        // recovery onto a fresh WorkerW, etc.).
+        let mut parent_client = windows::Win32::Foundation::RECT::default();
+        GetClientRect(target.parent, &mut parent_client).map_err(|e| {
+            let le = GetLastError();
+            anyhow::anyhow!(
+                "GetClientRect(parent) failed: {} (GetLastError={:?})",
+                e,
+                le
+            )
+        })?;
+        let pw = parent_client.right - parent_client.left;
+        let ph = parent_client.bottom - parent_client.top;
+        println!("[reparent] WorkerW GetClientRect = {}x{}", pw, ph);
+
+        SetWindowPos(
             hwnd,
             Some(HWND_BOTTOM),
             0,
             0,
-            w,
-            h,
+            pw,
+            ph,
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
-        );
-        println!("[reparent] SetWindowPos HWND_BOTTOM {}x{}", w, h);
-
-        // Verify final client area matches what we asked for. Per spec: use
-        // the host WorkerW's GetClientRect to confirm the target paint surface.
-        let mut client = windows::Win32::Foundation::RECT::default();
-        if GetClientRect(hwnd, &mut client).is_ok() {
-            println!(
-                "[reparent] host GetClientRect = {}x{}",
-                client.right - client.left,
-                client.bottom - client.top
-            );
-        }
-        let mut parent_client = windows::Win32::Foundation::RECT::default();
-        if GetClientRect(target.parent, &mut parent_client).is_ok() {
-            println!(
-                "[reparent] WorkerW GetClientRect = {}x{}",
-                parent_client.right - parent_client.left,
-                parent_client.bottom - parent_client.top
-            );
-        }
+        )
+        .map_err(|e| {
+            let le = GetLastError();
+            anyhow::anyhow!("SetWindowPos failed: {} (GetLastError={:?})", e, le)
+        })?;
+        println!("[reparent] SetWindowPos HWND_BOTTOM {}x{}", pw, ph);
     }
 
-    // Sync webview bounds. Use LogicalSize because wry's Rect.size is dpi::Size
-    // which it converts via to_physical(scale_factor) internally — passing
-    // PhysicalSize would be double-scaled on a 1.5x DPI display. Compute the
-    // logical size from the physical screen size + the host's DPI.
-    let (sw, sh) = primary_screen_size();
-    let dpi = dpi_for_hwnd(hwnd_isize(hwnd));
-    let scale = dpi as f64 / 96.0;
-    let logical_w = sw as f64 / scale;
-    let logical_h = sh as f64 / scale;
-    let _ = webview.set_bounds(wry::Rect {
-        position: tao::dpi::LogicalPosition::new(0.0, 0.0).into(),
-        size: tao::dpi::LogicalSize::new(logical_w, logical_h).into(),
-    });
-    println!(
-        "[reparent] webview.set_bounds logical {}x{} (physical {}x{}, dpi={}, scale={})",
-        logical_w, logical_h, sw, sh, dpi, scale
-    );
+    // Read the host's ACTUAL client rect after attach — this is the source of
+    // truth for the webview bounds (not primary_screen_size, not parent rect).
+    // Per Codex verdict: use PhysicalPosition(0,0) + PhysicalSize(client_w,
+    // client_h). wry 0.55's Size::Physical branch is a no-op in to_physical,
+    // so no double-scaling.
+    let mut host_client = windows::Win32::Foundation::RECT::default();
+    unsafe {
+        GetClientRect(HWND(hwnd_isize as _), &mut host_client).map_err(|e| {
+            let le = GetLastError();
+            anyhow::anyhow!("GetClientRect(host) failed: {} (GetLastError={:?})", e, le)
+        })?;
+    }
+    let cw = host_client.right - host_client.left;
+    let ch = host_client.bottom - host_client.top;
+    if cw <= 0 || ch <= 0 {
+        return Err(anyhow::anyhow!(
+            "host GetClientRect returned non-positive size: {}x{}",
+            cw,
+            ch
+        ));
+    }
+    println!("[reparent] host GetClientRect = {}x{}", cw, ch);
 
-    log_window_state(hwnd_isize(hwnd), "after reparent");
+    webview
+        .set_bounds(wry::Rect {
+            position: tao::dpi::PhysicalPosition::new(0.0, 0.0).into(),
+            size: tao::dpi::PhysicalSize::new(cw as f64, ch as f64).into(),
+        })
+        .map_err(|e| anyhow::anyhow!("webview.set_bounds failed: {}", e))?;
+    println!("[reparent] webview.set_bounds physical {}x{}", cw, ch);
+
+    log_window_state(hwnd_isize, "after reparent");
     println!("[reparent] mode={:?} done", mode);
-    log_full_geometry(hwnd_isize(hwnd), "after reparent (full geom)");
+    log_full_geometry(hwnd_isize, "after reparent (full geom)");
     Ok(())
-}
-
-/// Convert windows HWND back to isize for logging helpers.
-fn hwnd_isize(hwnd: windows::Win32::Foundation::HWND) -> isize {
-    hwnd.0 as isize
 }
 
 /// Log a window's HWND, parent, style, exstyle, rect, and direct children.
