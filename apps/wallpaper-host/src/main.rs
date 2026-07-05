@@ -148,6 +148,13 @@ fn main() -> anyhow::Result<()> {
 
 /// Run the event loop. In reparent modes, schedule the reparent after a delay
 /// so the page has time to load.
+///
+/// Uses ControlFlow::WaitUntil with absolute deadlines (per Codex verdict):
+/// tao 0.35 Windows has a dedicated wait thread using MsgWaitForMultipleObjectsEx,
+/// which wakes on timeout independent of whether the (transparent/noactivate)
+/// wallpaper HWND receives input. Each tick advances the fired task's deadline
+/// by its interval; if a deadline has fallen behind `now`, it is advanced in a
+/// loop until it's in the future (avoids busy-looping on a stale Instant).
 fn run_event_loop(
     event_loop: EventLoop<()>,
     args: Args,
@@ -156,46 +163,95 @@ fn run_event_loop(
     mode: Mode,
     webview: wry::WebView,
 ) {
-    // Reparent delay: gives WebView2 + page time to initialize on the
-    // top-level window before we move it. Logged as an explicit timing hack.
-    // 1500ms per spec; a page-load callback would be better but wry's API
-    // makes that awkward in this PoC.
-    const REPARENT_DELAY_MS: u64 = 1500;
-    let mut reparent_done = mode == Mode::TopLevel; // A0 never reparents
-    let start = Instant::now();
-    let guardian_interval = Duration::from_millis(args.guardian_interval_ms);
-    let mut last_guardian = Instant::now();
-    let mut last_status = Instant::now();
+    const REPARENT_DELAY: Duration = Duration::from_millis(1500);
+    const STATUS_INTERVAL: Duration = Duration::from_millis(3000);
 
-    // Hold webview + window alive via the closure. window is moved in below.
+    let guardian_interval = Duration::from_millis(args.guardian_interval_ms);
+    let now = Instant::now();
+
+    // Absolute deadlines. reparent_at is one-shot: set to None once consumed.
+    let mut reparent_at: Option<Instant> = if mode == Mode::TopLevel {
+        None // A0 never reparents
+    } else {
+        Some(now + REPARENT_DELAY)
+    };
+    let mut next_guardian_at = now + guardian_interval;
+    let mut next_status_at = now + STATUS_INTERVAL;
+
+    // Diagnostic counters for the trace log.
+    // Diagnostic: confirm WaitUntil wakes via ResumeTimeReached (log once).
+    let mut trace_logged = false;
+
     let webview = webview;
     event_loop.run(move |event, _, control_flow| {
-        // Poll instead of Wait so MainEventsCleared fires continuously — needed
-        // for the reparent delay + guardian tick to actually run. Wait blocks
-        // when there are no window events (e.g. after WS_EX_TRANSPARENT).
-        *control_flow = ControlFlow::Poll;
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
                 *control_flow = ControlFlow::Exit;
+                return;
+            }
+            Event::NewEvents(start_cause) => {
+                // Diagnostic: log StartCause once to confirm WaitUntil wakes
+                // via ResumeTimeReached (not just Poll-like spam).
+                if !trace_logged {
+                    if let tao::event::StartCause::ResumeTimeReached { .. } = start_cause {
+                        println!("[trace] NewEvents: ResumeTimeReached (WaitUntil working)");
+                        trace_logged = true;
+                    }
+                }
             }
             Event::MainEventsCleared => {
-                // Reparent step (A1/A2) after the delay.
-                if !reparent_done && start.elapsed() >= Duration::from_millis(REPARENT_DELAY_MS) {
-                    reparent_done = true;
-                    let _ = do_reparent(hwnd, &target, mode, &webview);
+                let now = Instant::now();
+
+                // One-shot reparent.
+                if let Some(deadline) = reparent_at {
+                    if now >= deadline {
+                        let t0 = Instant::now();
+                        let _ = do_reparent(hwnd, &target, mode, &webview);
+                        println!(
+                            "[trace] reparent fired at {:?} (scheduled at start+{:?})",
+                            t0, REPARENT_DELAY
+                        );
+                        reparent_at = None; // remove from min-deadline calc
+                    }
                 }
-                // Guardian: healthy = no-op.
-                if last_guardian.elapsed() >= guardian_interval {
-                    last_guardian = Instant::now();
+
+                // Guardian tick.
+                if now >= next_guardian_at {
+                    // Advance past now in a loop so a stale deadline doesn't
+                    // immediately re-trigger on the next MainEventsCleared.
+                    while next_guardian_at <= now {
+                        next_guardian_at += guardian_interval;
+                    }
                     guardian_tick(hwnd, target.parent);
                 }
-                // Periodic status log every ~3s.
-                if last_status.elapsed() >= Duration::from_millis(3000) {
-                    last_status = Instant::now();
+
+                // Periodic status log.
+                if now >= next_status_at {
+                    while next_status_at <= now {
+                        next_status_at += STATUS_INTERVAL;
+                    }
                     log_window_state(hwnd, "alive");
+                }
+
+                // Compute next deadline = min of remaining absolute deadlines.
+                let next = [reparent_at, Some(next_guardian_at), Some(next_status_at)]
+                    .into_iter()
+                    .flatten()
+                    .min();
+                match next {
+                    Some(deadline) => {
+                        // Advance if already past (defensive; the per-task
+                        // loops above should have prevented this).
+                        let deadline = if deadline <= now { now } else { deadline };
+                        *control_flow = ControlFlow::WaitUntil(deadline);
+                    }
+                    // No future tasks (e.g. A0 with reparent_at=None after
+                    // guardian/status also exhausted — shouldn't happen, but
+                    // fall back to a long Wait rather than busy-loop).
+                    None => *control_flow = ControlFlow::Wait,
                 }
             }
             _ => {}
