@@ -23,8 +23,8 @@ use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, FindWindowW, GetAncestor, GetClassNameW, GetWindowLongPtrW,
-    GetWindowRect, IsWindowVisible, SendMessageTimeoutW, GA_PARENT, SMTO_NORMAL,
-    WINDOW_LONG_PTR_INDEX, WS_EX_NOREDIRECTIONBITMAP,
+    GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, SendMessageTimeoutW, GA_PARENT,
+    SMTO_NORMAL, WINDOW_LONG_PTR_INDEX, WS_EX_NOREDIRECTIONBITMAP,
 };
 
 /// WM_SPAWN_WORKERW — undocumented message that directs Progman to spawn a
@@ -79,11 +79,26 @@ struct EnumState {
 
 /// Probe the desktop and decide where to attach. Sends 0x052C exactly once
 /// (idempotent — caller must NOT loop this on every guardian tick).
+///
+/// Backwards-compatible thin wrapper: creates a fresh SpawnSession, so 0x052C
+/// is always sent on the first call. Prefer [`probe_for_recovery`] from the
+/// host state machine, which reuses a session across rebuilds so 0x052C is
+/// only re-sent when the Explorer identity (Progman HWND + PID) actually
+/// changes.
+#[allow(dead_code)] // kept for external/compat use; host uses probe_for_recovery
 pub fn probe() -> Result<DesktopTarget> {
+    let mut session = SpawnSession::default();
+    probe_for_recovery(&mut session)
+}
+
+/// Probe desktop topology **without** sending 0x052C. Pure read-only
+/// enumeration + variant selection. Exposed for callers that have already
+/// ensured the WorkerW exists (e.g. via [`probe_for_recovery`]); the host
+/// state machine uses `probe_for_recovery`.
+#[allow(dead_code)]
+pub fn probe_topology() -> Result<DesktopTarget> {
     let progman = unsafe { FindWindowW(w!("Progman"), None).context("Progman not found")? };
     println!("[desktop] Progman = {:?}", progman);
-
-    spawn_worker_w(progman)?;
 
     let progman_ex = unsafe { GetWindowLongPtrW(progman, GWLP_EXSTYLE) } as u32;
     let is_raised = (progman_ex & WS_EX_NOREDIRECTIONBITMAP.0) != 0;
@@ -101,6 +116,96 @@ pub fn probe() -> Result<DesktopTarget> {
         return select_raised(progman, def_view);
     }
     select_classic_or_collapsed(def_view_host, def_view, state.workers)
+}
+
+/// Identity of the Explorer shell generation we last sent 0x052C to. Two
+/// values are equal iff they refer to the same Progman window owned by the
+/// same process — the cheapest stable signal that Explorer has not been
+/// restarted since the last spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellIdentity {
+    /// Progman HWND as an isize (HWND is not Hash/Eq across windows 0.61).
+    progman: isize,
+    /// PID of the process owning Progman.
+    pid: u32,
+}
+
+/// Per-host session tracking whether we have already asked Progman to spawn
+/// the wallpaper WorkerW for the *current* Explorer generation. Held by
+/// `HostState` and reused across rebuilds so retries within the same shell
+/// generation do not re-send 0x052C.
+#[derive(Debug, Default)]
+pub struct SpawnSession {
+    last_spawned: Option<ShellIdentity>,
+}
+
+impl SpawnSession {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Probe + send 0x052C only when the Explorer shell identity has changed
+/// since the last successful spawn recorded in `session`. Within one shell
+/// generation the spawn is idempotent and skipped, which is what the recovery
+/// state machine needs: repeated build retries after a transient failure must
+/// not re-trigger 0x052C (and re-spawn WorkerW) for the same Explorer.
+pub fn probe_for_recovery(session: &mut SpawnSession) -> Result<DesktopTarget> {
+    let progman = unsafe { FindWindowW(w!("Progman"), None).context("Progman not found")? };
+    println!("[desktop] Progman = {:?}", progman);
+
+    let pid = pid_of(progman);
+    let identity = ShellIdentity {
+        progman: progman.0 as isize,
+        pid,
+    };
+
+    if session.last_spawned == Some(identity) {
+        println!(
+            "[desktop] 0x052C skipped (same shell identity progman=0x{:x} pid={})",
+            identity.progman, identity.pid
+        );
+    } else {
+        println!(
+            "[desktop] 0x052C sent for new shell identity progman=0x{:x} pid={}",
+            identity.progman, identity.pid
+        );
+        spawn_worker_w(progman)?;
+        session.last_spawned = Some(identity);
+    }
+
+    probe_topology_from(progman)
+}
+
+/// Same as [`probe_topology`] but reuses an already-resolved Progman HWND so
+/// we do not FindWindowW twice.
+fn probe_topology_from(progman: HWND) -> Result<DesktopTarget> {
+    let progman_ex = unsafe { GetWindowLongPtrW(progman, GWLP_EXSTYLE) } as u32;
+    let is_raised = (progman_ex & WS_EX_NOREDIRECTIONBITMAP.0) != 0;
+    println!(
+        "[desktop] Progman EX=0x{:x} NOREDIR={} raised={}",
+        progman_ex, is_raised, is_raised
+    );
+
+    let state = enumerate_shell()?;
+
+    let def_view_host = state.def_view_host;
+    let def_view = state.def_view;
+
+    if is_raised {
+        return select_raised(progman, def_view);
+    }
+    select_classic_or_collapsed(def_view_host, def_view, state.workers)
+}
+
+/// PID of the process owning `hwnd`, via GetWindowThreadProcessId. Returns 0
+/// if the call fails — callers treat (progman HWND, pid) as an opaque
+/// identity token, so a 0 PID simply means "could not be determined" and the
+/// spawn-skip logic falls back to comparing just the HWND.
+fn pid_of(hwnd: HWND) -> u32 {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    pid
 }
 
 /// Send WM_SPAWN_WORKERW to Progman. Idempotent.

@@ -15,6 +15,35 @@
 //!
 //! The previous "nested child = no surface" claim is UNVERIFIED — these modes
 //! exist to test it. See plan/p2.0-webview2-blocker.md.
+//!
+//! ## P2.1: Explorer recovery state machine
+//!
+//! The host runs a 4-state lifecycle so that an Explorer restart (or any
+//! failure between probe and page-ready) is recovered without exiting:
+//!
+//! ```text
+//! RecoverQueued ─► (sync build candidate) ─► WaitingForPage
+//!      ▲                                         │
+//!      │                                         ▼ PageLoadFinished
+//!      │                                   attach/bounds/show ─► Running
+//!      │                                         │
+//!      │              any failure ◄──────────────┴──────────► guardian verdict
+//!      │                                         │
+//!      └──────────── Backoff (exp. retry) ◄──────┘
+//! ```
+//!
+//! Key invariants (per Codex review msg_2zt1fuY):
+//! - `page-ready` is the *only* attach gate; the old `reparent_at` one-shot
+//!   delay is gone.
+//! - `WebViewBuilder::build` is synchronous (wry 0.55 waits on the WebView2
+//!   COM controller), but page load is not — `WaitingForPage` has a hard
+//!   timeout (default 12s) that drops the candidate and backs off.
+//! - `with_on_page_load_handler` closures only `send_event`; all state
+//!   mutation and `do_reparent` happen back inside `Event::UserEvent`.
+//! - 0x052C is sent at most once per Explorer shell identity (Progman HWND +
+//!   PID); repeated retries for the same shell skip it (see `desktop.rs`).
+//! - Window events are filtered by `WindowId` so a stale destroyed window
+//!   cannot trip the active generation.
 
 mod desktop;
 mod renderer;
@@ -22,15 +51,17 @@ mod renderer;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
+use tao::event_loop::{
+    ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget,
+};
 use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
 use tao::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    window::{Window, WindowBuilder, WindowId},
 };
-use wry::WebViewBuilder;
+use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder};
 
-use crate::desktop::{probe, DesktopTarget};
+use crate::desktop::{probe_for_recovery, DesktopTarget, DesktopVariant, SpawnSession};
 use crate::renderer::{make_handler, RendererRoot, ENTRY_URL};
 
 /// Diagnostic mode controlling how/when the window attaches to the desktop.
@@ -45,6 +76,17 @@ enum Mode {
     /// A2: A1 + incremental click-through ex-styles.
     #[value(name = "reparent-click-through")]
     ReparentClickThrough,
+}
+
+impl Mode {
+    /// Whether this mode performs a SetParent into the desktop target after
+    /// page-ready. A0 does not.
+    fn attaches_to_desktop(self) -> bool {
+        match self {
+            Mode::TopLevel => false,
+            Mode::Reparent | Mode::ReparentClickThrough => true,
+        }
+    }
 }
 
 /// CLI args.
@@ -62,7 +104,178 @@ struct Args {
     /// Watchdog interval for the guardian tick, in milliseconds (min 50).
     #[arg(long, default_value_t = 500, value_parser = clap::value_parser!(u64).range(50..))]
     guardian_interval_ms: u64,
+
+    /// Page-ready timeout: how long to wait for `PageLoadEvent::Finished`
+    /// after `WebViewBuilder::build` returns before declaring the candidate
+    /// failed and backing off (seconds).
+    #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u64).range(3..))]
+    page_timeout_secs: u64,
 }
+
+// ─── Recovery state machine ────────────────────────────────────────────────
+
+/// User events delivered through `EventLoopProxy::send_event`. Both the
+/// guardian and the page-load handler use this channel; all state mutation
+/// happens back inside `Event::UserEvent`, never in the page-load closure
+/// (which is `'static` and cannot borrow `HostState`).
+#[derive(Debug, Clone)]
+enum HostEvent {
+    /// Guardian (or page-timeout / startup) decided a rebuild is needed.
+    /// Carries the token of the generation it was issued for, so a stale
+    /// event arriving after a newer rebuild started is ignored.
+    RecoveryRequested { token: u64, reason: RecoveryReason },
+    /// `PageLoadEvent::Finished` fired for a candidate. The page-load closure
+    /// only forwards this; the actual attach happens in the handler.
+    PageLoadFinished { token: u64, url: String },
+}
+
+/// Why a recovery was requested. Diagnostic only — drives the log line.
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // some variants only surfaced via logs / future IPC
+enum RecoveryReason {
+    /// `IsWindow(host) == false` — our own window was destroyed.
+    HostWindowInvalid,
+    /// `IsWindow(parent) == false` — WorkerW/Progman gone (Explorer died).
+    ParentInvalid,
+    /// Parent HWND changed since attach — reparented away from the target.
+    ParentMismatch,
+    /// Page did not fire `Finished` within `page_timeout_secs`.
+    PageTimeout,
+    /// Initial startup / first generation.
+    Startup,
+}
+
+impl RecoveryReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            RecoveryReason::HostWindowInvalid => "host-hwnd-invalid",
+            RecoveryReason::ParentInvalid => "parent-invalid",
+            RecoveryReason::ParentMismatch => "parent-mismatch",
+            RecoveryReason::PageTimeout => "page-timeout",
+            RecoveryReason::Startup => "startup",
+        }
+    }
+}
+
+/// 4-state lifecycle (per Codex review). `Running` is the only state where the
+/// runtime is considered the *active* generation; everything else is either
+/// building a candidate or waiting/backoff before another attempt.
+#[derive(Debug)]
+#[allow(dead_code)] // some fields are surfaced via Debug / logs only
+enum Lifecycle {
+    /// A rebuild has been requested (or initial startup). `build_candidate`
+    /// runs on the next `MainEventsCleared` (or directly off the
+    /// `RecoveryRequested` UserEvent).
+    RecoverQueued {
+        token: u64,
+        attempt: u32,
+        reason: RecoveryReason,
+    },
+    /// Candidate window + WebView built; waiting for `PageLoadEvent::Finished`
+    /// before attaching. Has a hard timeout to avoid hanging forever if the
+    /// page never loads.
+    WaitingForPage {
+        token: u64,
+        attempt: u32,
+        timeout_at: Instant,
+    },
+    /// Candidate is attached, visible, and monitored by the guardian.
+    Running,
+    /// Last attempt failed (probe / build / attach / page-timeout). Wait
+    /// until `retry_at`, then re-queue with `attempt` (already incremented
+    /// when entering Backoff) and a fresh token.
+    Backoff {
+        token: u64,
+        attempt: u32,
+        retry_at: Instant,
+    },
+}
+
+/// Owned wallpaper surface for one generation. The webview is dropped before
+/// the window (both must die on the UI/COM thread; `WebView` is `!Send`).
+struct HostRuntime {
+    generation: u64,
+    window: Window,
+    webview: WebView,
+    target: DesktopTarget,
+    window_id: WindowId,
+}
+
+impl HostRuntime {
+    /// Drop the WebView before the Window, explicitly and in order. We want
+    /// the WebView controller closed before the HWND is destroyed, and we do
+    /// NOT want a partially-SetParent'd HWND reused on a retry — so the caller
+    /// controls timing via this method rather than letting `drop` reorder.
+    fn destroy(self) {
+        drop(self.webview);
+        drop(self.window);
+    }
+}
+
+/// All mutable host state, captured by the event-loop closure.
+struct HostState {
+    runtime: Option<HostRuntime>,
+    lifecycle: Lifecycle,
+    next_guardian_at: Instant,
+    next_status_at: Instant,
+    spawn_session: SpawnSession,
+    proxy: EventLoopProxy<HostEvent>,
+    /// Generation counter of the currently Running runtime. The candidate
+    /// being built carries `active_generation + 1` and only commits here once
+    /// attach + show succeed.
+    active_generation: u64,
+    /// Monotonic token used to invalidate in-flight page-load callbacks. Bumped
+    /// on every rebuild start; a `PageLoadFinished` whose token no longer
+    /// matches the current `WaitingForPage` token is ignored.
+    next_token: u64,
+}
+
+impl HostState {
+    fn current_window_id(&self) -> Option<WindowId> {
+        self.runtime.as_ref().map(|r| r.window_id)
+    }
+
+    /// Allocate the next token and bump the counter. Used when queueing a
+    /// rebuild.
+    fn alloc_token(&mut self) -> u64 {
+        let t = self.next_token;
+        self.next_token += 1;
+        t
+    }
+
+    /// Transition into `Backoff` after a failed attempt, computing the retry
+    /// deadline from the (already-incremented) attempt number.
+    fn enter_backoff(&mut self, token: u64, attempt_before_increment: u32) {
+        let attempt = attempt_before_increment + 1;
+        let delay = backoff_delay(attempt);
+        eprintln!(
+            "[recovery] → Backoff (token={}, attempt={}, retry in {:?})",
+            token, attempt, delay
+        );
+        self.lifecycle = Lifecycle::Backoff {
+            token,
+            attempt,
+            retry_at: Instant::now() + delay,
+        };
+    }
+}
+
+/// Exponential backoff with a cap. attempt=1 → 500ms, 2 → 1s, 3 → 2s,
+/// 4 → 4s, ≥5 → 8s. attempt=0 (initial startup retry) is the short 200ms.
+fn backoff_delay(attempt: u32) -> Duration {
+    match attempt {
+        0 => Duration::from_millis(200),
+        1 => Duration::from_millis(500),
+        2 => Duration::from_secs(1),
+        3 => Duration::from_secs(2),
+        4 => Duration::from_secs(4),
+        _ => Duration::from_secs(8),
+    }
+}
+
+/// Status log cadence. Kept slow — guardian already ticks every
+/// `guardian_interval_ms` and the status line is for offline log analysis.
+const STATUS_INTERVAL: Duration = Duration::from_secs(3);
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -71,31 +284,515 @@ fn main() -> anyhow::Result<()> {
         args.renderer, args.mode
     );
 
-    // Probe desktop topology (always — cheap, gives diagnostics even in A0).
-    let target = probe()?;
+    let root = RendererRoot::new(&args.renderer)?;
+
+    // EventLoop with a custom user-event type so guardian + page-load handler
+    // can decouple "discovery" from "execute" via send_event. The custom type
+    // must be set on the builder, not on EventLoop::new() (which pins T=()).
+    let event_loop: EventLoop<HostEvent> = EventLoopBuilder::<HostEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
+
+    let now = Instant::now();
+    let guardian_interval = Duration::from_millis(args.guardian_interval_ms);
+    let page_timeout = Duration::from_secs(args.page_timeout_secs);
+    let first_token = 1;
+
+    let state = HostState {
+        runtime: None,
+        // First generation: queue an immediate build. attempt=0 so the first
+        // backoff_delay (if it ever fires) is the short 200ms.
+        lifecycle: Lifecycle::RecoverQueued {
+            token: first_token,
+            attempt: 0,
+            reason: RecoveryReason::Startup,
+        },
+        next_guardian_at: now + guardian_interval,
+        next_status_at: now + STATUS_INTERVAL,
+        spawn_session: SpawnSession::new(),
+        proxy: proxy.clone(),
+        active_generation: 0,
+        next_token: first_token + 1,
+    };
+
+    let ctx = Ctx {
+        args,
+        root,
+        guardian_interval,
+        page_timeout,
+    };
+
+    run_event_loop(event_loop, state, ctx);
+    // run() diverges; this is unreachable but keeps the signature honest.
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+/// Immutable config threaded into the event loop.
+struct Ctx {
+    args: Args,
+    root: RendererRoot,
+    guardian_interval: Duration,
+    page_timeout: Duration,
+}
+
+/// Run the event loop with the recovery state machine.
+///
+/// Uses `ControlFlow::WaitUntil` with absolute deadlines (per earlier Codex
+/// verdict): tao 0.35 Windows has a dedicated wait thread using
+/// `MsgWaitForMultipleObjectsEx`, which wakes on timeout independent of
+/// whether the (transparent/noactivate) wallpaper HWND receives input.
+fn run_event_loop(event_loop: EventLoop<HostEvent>, mut state: HostState, ctx: Ctx) {
+    event_loop.run(move |event, target, control_flow| {
+        match event {
+            Event::UserEvent(HostEvent::RecoveryRequested { token, reason }) => {
+                handle_recovery_requested(&mut state, target, &ctx, token, reason);
+            }
+            Event::UserEvent(HostEvent::PageLoadFinished { token, url }) => {
+                on_page_load_finished(&mut state, &ctx, token, url);
+            }
+            Event::WindowEvent {
+                window_id, event, ..
+            } => {
+                handle_window_event(&mut state, window_id, event, control_flow);
+            }
+            Event::MainEventsCleared => {
+                let now = Instant::now();
+                schedule(&mut state, target, &ctx, now);
+                *control_flow = ControlFlow::WaitUntil(next_deadline(&state, now));
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Decide what to do based on the current lifecycle when the loop wakes up.
+/// `target` is the `EventLoopWindowTarget` we use to create new windows.
+fn schedule(
+    state: &mut HostState,
+    target: &EventLoopWindowTarget<HostEvent>,
+    ctx: &Ctx,
+    now: Instant,
+) {
+    match state.lifecycle {
+        Lifecycle::RecoverQueued { .. } => {
+            build_candidate(state, target, ctx);
+        }
+        Lifecycle::WaitingForPage { timeout_at, .. } if now >= timeout_at => {
+            // Page-ready timeout: drop the candidate, back off.
+            let (token, attempt) = match state.lifecycle {
+                Lifecycle::WaitingForPage { token, attempt, .. } => (token, attempt),
+                _ => unreachable!(),
+            };
+            eprintln!(
+                "[recovery] page-ready timeout (token={}, attempt={}) → Backoff",
+                token, attempt
+            );
+            if let Some(old) = state.runtime.take() {
+                eprintln!("[recovery] dropping candidate gen={}", old.generation);
+                old.destroy();
+            }
+            state.enter_backoff(token, attempt);
+        }
+        Lifecycle::Backoff { retry_at, .. } if now >= retry_at => {
+            // Retry: re-queue with a fresh token, same attempt count (already
+            // incremented when entering Backoff).
+            let attempt = match state.lifecycle {
+                Lifecycle::Backoff { attempt, .. } => attempt,
+                _ => unreachable!(),
+            };
+            let token = state.alloc_token();
+            println!(
+                "[recovery] Backoff expired → RecoverQueued (token={}, attempt={})",
+                token, attempt
+            );
+            state.lifecycle = Lifecycle::RecoverQueued {
+                token,
+                attempt,
+                reason: RecoveryReason::Startup,
+            };
+            build_candidate(state, target, ctx);
+        }
+        Lifecycle::Running => {
+            if now >= state.next_guardian_at {
+                while state.next_guardian_at <= now {
+                    state.next_guardian_at += ctx.guardian_interval;
+                }
+                run_guardian(state, ctx.args.mode.attaches_to_desktop());
+            }
+            if now >= state.next_status_at {
+                while state.next_status_at <= now {
+                    state.next_status_at += STATUS_INTERVAL;
+                }
+                if let Some(rt) = state.runtime.as_ref() {
+                    log_window_state(rt.window.hwnd() as isize, "alive");
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `RecoveryRequested` arrives from guardian / startup / page-load handler.
+/// Only act if we are still in `RecoverQueued` for the same token — otherwise
+/// it's a duplicate or stale event (a newer rebuild already started).
+fn handle_recovery_requested(
+    state: &mut HostState,
+    target: &EventLoopWindowTarget<HostEvent>,
+    ctx: &Ctx,
+    token: u64,
+    reason: RecoveryReason,
+) {
+    let current_token_matches = matches!(state.lifecycle,
+        Lifecycle::RecoverQueued { token: t, .. } if t == token);
+    if !current_token_matches {
+        println!(
+            "[recovery] RecoveryRequested token={} ignored (lifecycle no longer RecoverQueued for that token)",
+            token
+        );
+        return;
+    }
     println!(
-        "[host] desktop variant = {:?}, parent = {:?}, insert_after = {:?}",
-        target.variant, target.parent, target.insert_after
+        "[recovery] RecoveryRequested token={} reason={}",
+        token,
+        reason.as_str()
+    );
+    build_candidate(state, target, ctx);
+}
+
+/// Build a candidate window + WebView. Synchronous: `WebViewBuilder::build`
+/// blocks until the WebView2 controller is initialised (wry 0.55 pumps
+/// messages internally). On any failure we enter Backoff without touching
+/// `runtime`. On success we move to `WaitingForPage` and let the page-load
+/// handler drive the attach.
+fn build_candidate(
+    state: &mut HostState,
+    target: &EventLoopWindowTarget<HostEvent>,
+    ctx: &Ctx,
+) {
+    let (token, attempt) = match state.lifecycle {
+        Lifecycle::RecoverQueued { token, attempt, .. } => (token, attempt),
+        _ => return,
+    };
+
+    // 1. Drop any previous runtime (initial startup has none; a rebuild after
+    // a guardian verdict has the dead one).
+    if let Some(old) = state.runtime.take() {
+        eprintln!(
+            "[recovery] dropping previous runtime gen={}",
+            old.generation
+        );
+        old.destroy();
+    }
+
+    // 2. Probe desktop topology. 0x052C is sent only if the Explorer shell
+    // identity changed since the last successful spawn.
+    let desktop_target = match probe_for_recovery(&mut state.spawn_session) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[recovery] probe failed: {} → Backoff", e);
+            state.enter_backoff(token, attempt);
+            return;
+        }
+    };
+    println!(
+        "[recovery] desktop variant = {:?}, parent = {:?}, insert_after = {:?}",
+        desktop_target.variant, desktop_target.parent, desktop_target.insert_after
     );
 
-    let root = RendererRoot::new(&args.renderer)?;
-    let mode = args.mode;
+    // Raised/Collapsed: fail-closed. Do not attempt an unverified attach.
+    if ctx.args.mode.attaches_to_desktop() && desktop_target.variant != DesktopVariant::Classic {
+        eprintln!(
+            "[recovery] variant {:?} not supported → Backoff (fail-closed)",
+            desktop_target.variant
+        );
+        state.enter_backoff(token, attempt);
+        return;
+    }
 
-    // Window creation: A0/A1/A2 all start as a plain top-level window with NO
-    // parent and NO exotic ex-styles. with_parent_window is NEVER used — the
-    // "creation-time parent" route caused E_INVALIDARG and is not what we test
-    // here. Reparent (when used) happens AFTER WebView2 creation.
-    let event_loop = EventLoop::new();
-    // Size the window to the actual primary monitor (physical px), not a
-    // hardcoded 1920x1080 — that clips on displays with different resolution.
+    // 3. Create the host window hidden. We only show it after a successful
+    // attach so a failing candidate never flashes on the desktop.
+    let window = match build_window(target) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("[recovery] window build failed: {} → Backoff", e);
+            state.enter_backoff(token, attempt);
+            return;
+        }
+    };
+    let window_id = window.id();
+    let hwnd = window.hwnd();
+    println!(
+        "[recovery] candidate window created hidden; hwnd=0x{:x}; undecorated_shadow={}",
+        hwnd,
+        window.has_undecorated_shadow()
+    );
+
+    // 4. Build the WebView synchronously and register a page-load handler
+    // that ONLY forwards Finished events via send_event. The closure cannot
+    // borrow HostState ('static), so it carries just the proxy + token.
+    let proxy = state.proxy.clone();
+    let webview = WebViewBuilder::new()
+        .with_url(ENTRY_URL)
+        .with_custom_protocol(renderer::SCHEME.to_string(), make_handler(ctx.root.clone()))
+        .with_on_page_load_handler(move |event, url| {
+            if matches!(event, PageLoadEvent::Finished) {
+                if let Err(e) = proxy.send_event(HostEvent::PageLoadFinished {
+                    token,
+                    url: url.clone(),
+                }) {
+                    eprintln!("[recovery] PageLoadFinished send_event failed: {:?}", e);
+                }
+            }
+        })
+        .build(&window);
+    let webview = match webview {
+        Ok(wv) => {
+            println!("[recovery] WebView2 created; loaded {}", ENTRY_URL);
+            wv
+        }
+        Err(e) => {
+            eprintln!("[recovery] WebView build failed: {} → Backoff", e);
+            // window dropped here implicitly
+            drop(window);
+            state.enter_backoff(token, attempt);
+            return;
+        }
+    };
+
+    // 5. Candidate ready. Move to WaitingForPage with a hard timeout.
+    let candidate_generation = state.active_generation + 1;
+    state.runtime = Some(HostRuntime {
+        generation: candidate_generation,
+        window,
+        webview,
+        target: desktop_target,
+        window_id,
+    });
+    let timeout_at = Instant::now() + ctx.page_timeout;
+    state.lifecycle = Lifecycle::WaitingForPage {
+        token,
+        attempt,
+        timeout_at,
+    };
+    println!(
+        "[recovery] candidate gen={} built → WaitingForPage (timeout {:?})",
+        candidate_generation, ctx.page_timeout
+    );
+}
+
+/// `PageLoadEvent::Finished` arrived for a candidate. Validate token + URL,
+/// then attach + show. Any attach failure tears the candidate down and enters
+/// Backoff (we never retry attach in place on a partially-SetParent'd HWND).
+fn on_page_load_finished(state: &mut HostState, ctx: &Ctx, token: u64, url: String) {
+    // Must be WaitingForPage for the same token; otherwise stale/duplicate.
+    let attempt = match state.lifecycle {
+        Lifecycle::WaitingForPage {
+            token: t,
+            attempt,
+            ..
+        } if t == token => attempt,
+        _ => {
+            println!(
+                "[recovery] PageLoadFinished token={} ignored (not WaitingForPage for that token); url={}",
+                token, url
+            );
+            return;
+        }
+    };
+
+    // URL sanity: only attach on the entry URL (allow trailing slash). A later
+    // in-page navigation must not re-trigger attach.
+    if !is_entry_url(&url) {
+        eprintln!(
+            "[recovery] PageLoadFinished url mismatch: {} → ignored",
+            url
+        );
+        return;
+    }
+
+    let (hwnd, target, generation) = match state.runtime.as_ref() {
+        Some(r) => (r.window.hwnd() as isize, r.target, r.generation),
+        None => {
+            eprintln!("[recovery] PageLoadFinished but runtime is None → Backoff");
+            state.enter_backoff(token, attempt);
+            return;
+        }
+    };
+
+    // For A0 (top-level) we skip SetParent entirely — there is no desktop
+    // attach. We still set bounds from the host client rect so the WebView
+    // fills the window.
+    let attach_result = if ctx.args.mode.attaches_to_desktop() {
+        do_reparent(hwnd, &target, ctx.args.mode, state.runtime.as_ref().unwrap().webview_ref())
+    } else {
+        set_webview_bounds_from_host(hwnd, state.runtime.as_ref().unwrap().webview_ref())
+    };
+
+    match attach_result {
+        Ok(()) => {
+            // Surface + bounds OK. Make it visible and commit the generation.
+            if let Some(rt) = state.runtime.as_ref() {
+                rt.window.set_visible(true);
+            }
+            state.active_generation = generation;
+            state.lifecycle = Lifecycle::Running;
+            state.next_guardian_at = Instant::now() + ctx.guardian_interval;
+            state.next_status_at = Instant::now() + STATUS_INTERVAL;
+            println!(
+                "[recovery] ✓ generation {} active (Running)",
+                state.active_generation
+            );
+            if let Some(rt) = state.runtime.as_ref() {
+                log_window_state(rt.window.hwnd() as isize, "after attach");
+                log_full_geometry(rt.window.hwnd() as isize, "after attach (full geom)");
+            }
+        }
+        Err(e) => {
+            eprintln!("[recovery] attach failed: {} → cleanup + Backoff", e);
+            if let Some(old) = state.runtime.take() {
+                old.destroy();
+            }
+            state.enter_backoff(token, attempt);
+        }
+    }
+}
+
+/// Guardian: only runs in `Running`. For desktop-attaching modes (A1/A2),
+/// checks (a) host window still valid, (b) parent still valid, (c) parent
+/// unchanged. For A0 (top-level, no SetParent) we only check the host window
+/// itself — there is no desktop parent to monitor, so the parent checks would
+/// always mismatch and spuriously trigger recovery.
+fn run_guardian(state: &mut HostState, attaches_to_desktop: bool) {
+    let (hwnd, expected_parent) = match state.runtime.as_ref() {
+        Some(r) => (r.window.hwnd() as isize, r.target.parent),
+        None => return,
+    };
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::IsWindow;
+
+    let host_hwnd = HWND(hwnd as _);
+    if !unsafe { IsWindow(Some(host_hwnd)) }.as_bool() {
+        request_recovery(state, RecoveryReason::HostWindowInvalid);
+        return;
+    }
+    if !attaches_to_desktop {
+        // A0: no desktop parent to monitor. Healthy.
+        return;
+    }
+    if !unsafe { IsWindow(Some(expected_parent)) }.as_bool() {
+        request_recovery(state, RecoveryReason::ParentInvalid);
+        return;
+    }
+    let actual_parent = desktop::true_parent(host_hwnd);
+    if actual_parent != expected_parent {
+        use windows::Win32::UI::WindowsAndMessaging::GetClassNameW;
+        let mut cls = [0u16; 64];
+        unsafe { GetClassNameW(actual_parent, &mut cls) };
+        eprintln!(
+            "[guardian] parent changed: expected 0x{:x} got 0x{:x} ({})",
+            expected_parent.0 as usize,
+            actual_parent.0 as usize,
+            String::from_utf16_lossy(&cls)
+        );
+        request_recovery(state, RecoveryReason::ParentMismatch);
+    }
+    // Healthy: nothing to log per-tick (status log covers it).
+}
+
+/// Transition Running → RecoverQueued and queue the UserEvent. Idempotent:
+/// no-op if already recovering.
+fn request_recovery(state: &mut HostState, reason: RecoveryReason) {
+    if !matches!(state.lifecycle, Lifecycle::Running) {
+        return;
+    }
+    let token = state.alloc_token();
+    state.lifecycle = Lifecycle::RecoverQueued {
+        token,
+        attempt: 0,
+        reason,
+    };
+    println!(
+        "[recovery] requested: {} (token={})",
+        reason.as_str(),
+        token
+    );
+    if let Err(e) = state
+        .proxy
+        .send_event(HostEvent::RecoveryRequested { token, reason })
+    {
+        // EventLoop closed — host is shutting down. Nothing to do.
+        eprintln!("[recovery] send_event failed (loop closed?): {:?}", e);
+    }
+}
+
+/// Filter window events by the active window id. A destroyed previous window
+/// can still deliver late events (CloseRequested / Destroyed); we ignore
+/// those so they cannot trip the current generation.
+fn handle_window_event(
+    state: &mut HostState,
+    window_id: WindowId,
+    event: WindowEvent,
+    control_flow: &mut ControlFlow,
+) {
+    if Some(window_id) != state.current_window_id() {
+        // Stale event from a previous-generation window.
+        return;
+    }
+    if let WindowEvent::CloseRequested = event {
+        // Host window close = shut down the whole host (user asked us to exit).
+        println!("[host] CloseRequested on active window → exit");
+        *control_flow = ControlFlow::Exit;
+    }
+}
+
+/// Compute the next WaitUntil deadline from the current lifecycle + periodic
+/// timers. `RecoverQueued` resolves immediately (build on next wake).
+fn next_deadline(state: &HostState, now: Instant) -> Instant {
+    let mut candidates: Vec<Instant> = Vec::new();
+    match state.lifecycle {
+        Lifecycle::RecoverQueued { .. } => candidates.push(now),
+        Lifecycle::WaitingForPage { timeout_at, .. } => candidates.push(timeout_at),
+        Lifecycle::Backoff { retry_at, .. } => candidates.push(retry_at),
+        Lifecycle::Running => {
+            candidates.push(state.next_guardian_at);
+            candidates.push(state.next_status_at);
+        }
+    }
+    candidates
+        .into_iter()
+        .min()
+        .unwrap_or_else(|| now + Duration::from_secs(60))
+}
+
+/// Accept the entry URL across wry/WebView2's normalisations. We registered
+/// the custom protocol as `wallpaper://`, but WebView2 reports the navigated
+/// URL back to the page-load handler as `http://wallpaper.localhost/`
+/// (virtual-host form). Accept both shapes so the page-ready signal from the
+/// initial navigation is not mistakenly rejected as a URL mismatch.
+fn is_entry_url(url: &str) -> bool {
+    const ALLOWED: &[&str] = &[
+        "wallpaper://localhost",
+        "wallpaper://localhost/",
+        "http://wallpaper.localhost",
+        "http://wallpaper.localhost/",
+        "https://wallpaper.localhost",
+        "https://wallpaper.localhost/",
+    ];
+    ALLOWED.iter().any(|a| url == *a)
+}
+
+/// Build the host window hidden, with the same options as the pre-recovery
+/// implementation (frameless, undecorated-shadow off, primary-screen sized).
+fn build_window(
+    target: &EventLoopWindowTarget<HostEvent>,
+) -> Result<Window, tao::error::OsError> {
     let (screen_w, screen_h) = primary_screen_size();
-    let builder = WindowBuilder::new()
+    WindowBuilder::new()
         .with_title("WallpaperAI")
         .with_decorations(false)
-        // tao default: decoration_shadow=true. On a frameless window this draws a
-        // ~11px resize/snap border (the source of the (11,2) WRY_WEBVIEW offset).
-        // Explicitly disable it. Per Codex verdict this must be tried before any
-        // custom WM_NCCALCSIZE subclass.
+        // tao default: decoration_shadow=true. On a frameless window this draws
+        // a ~11px resize/snap border (the source of the (11,2) WRY_WEBVIEW
+        // offset). Explicitly disable it.
         .with_undecorated_shadow(false)
         .with_resizable(false)
         .with_minimizable(false)
@@ -105,192 +802,73 @@ fn main() -> anyhow::Result<()> {
         // NO_REDIRECTION_BITMAP false: ensure a normal redirectable surface.
         .with_no_redirection_bitmap(false)
         .with_skip_taskbar(true)
+        // Hidden until attach succeeds — a failing candidate never flashes.
+        .with_visible(false)
         .with_inner_size(tao::dpi::PhysicalSize::new(
             screen_w as f64,
             screen_h as f64,
-        ));
-    println!("[host] primary screen = {}x{} px", screen_w, screen_h);
+        ))
+        .build(target)
+}
 
-    let window = builder.build(&event_loop)?;
-    window.set_visible(true);
-    let hwnd = window.hwnd();
-    println!(
-        "[host] top-level window created + visible; hwnd = 0x{:x}; undecorated_shadow={}",
-        hwnd,
-        window.has_undecorated_shadow()
-    );
-    log_window_state(hwnd, "after create");
-    log_full_geometry(hwnd, "after create (full geom)");
+/// Size the WebView to the host's actual client rect. Used for A0
+/// (top-level) where there is no SetParent. Returns Err if the rect is
+/// non-positive or set_bounds fails — propagated to the recovery state
+/// machine so a failure is treated as an attach failure (Backoff).
+fn set_webview_bounds_from_host(hwnd_isize: isize, webview: &WebView) -> anyhow::Result<()> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 
-    // A0 critical: do NOT touch styles before WebView2 creation. No WS_CHILD,
-    // no WS_EX_LAYERED, no WS_EX_TRANSPARENT, no SetLayeredWindowAttributes.
-    // The previous code mixed these in and they may have caused E_INVALIDARG.
-
-    // Create WebView2 on the clean top-level window.
-    println!("[host] creating WebView2 (build)...");
-    let webview = WebViewBuilder::new()
-        .with_url(ENTRY_URL)
-        .with_custom_protocol(renderer::SCHEME.to_string(), make_handler(root))
-        .build(&window);
-    match webview {
-        Ok(wv) => {
-            println!("[host] WebView2 created OK; loaded {}", ENTRY_URL);
-            run_event_loop(event_loop, args, hwnd, target, mode, wv);
-        }
-        Err(e) => {
-            eprintln!("[host] WebView2 creation FAILED: {}", e);
-            eprintln!("[host] A0 failure means the issue is NOT reparent-related; stopping.");
-            return Err(e.into());
-        }
+    let hwnd = HWND(hwnd_isize as _);
+    let mut host_client = windows::Win32::Foundation::RECT::default();
+    unsafe {
+        GetClientRect(hwnd, &mut host_client)
+            .map_err(|e| anyhow::anyhow!("GetClientRect(host) failed: {}", e))?;
     }
+    let cw = host_client.right - host_client.left;
+    let ch = host_client.bottom - host_client.top;
+    if cw <= 0 || ch <= 0 {
+        return Err(anyhow::anyhow!(
+            "host GetClientRect returned non-positive size: {}x{}",
+            cw,
+            ch
+        ));
+    }
+    webview.set_bounds(Rect {
+        position: tao::dpi::PhysicalPosition::new(0.0, 0.0).into(),
+        size: tao::dpi::PhysicalSize::new(cw as f64, ch as f64).into(),
+    })?;
+    println!("[reparent] webview.set_bounds physical {}x{}", cw, ch);
     Ok(())
 }
 
-/// Run the event loop. In reparent modes, schedule the reparent after a delay
-/// so the page has time to load.
-///
-/// Uses ControlFlow::WaitUntil with absolute deadlines (per Codex verdict):
-/// tao 0.35 Windows has a dedicated wait thread using MsgWaitForMultipleObjectsEx,
-/// which wakes on timeout independent of whether the (transparent/noactivate)
-/// wallpaper HWND receives input. Each tick advances the fired task's deadline
-/// by its interval; if a deadline has fallen behind `now`, it is advanced in a
-/// loop until it's in the future (avoids busy-looping on a stale Instant).
-fn run_event_loop(
-    event_loop: EventLoop<()>,
-    args: Args,
-    hwnd: isize,
-    target: DesktopTarget,
-    mode: Mode,
-    webview: wry::WebView,
-) {
-    const REPARENT_DELAY: Duration = Duration::from_millis(1500);
-    const STATUS_INTERVAL: Duration = Duration::from_millis(3000);
-
-    let guardian_interval = Duration::from_millis(args.guardian_interval_ms);
-    let now = Instant::now();
-
-    // Absolute deadlines. reparent_at is one-shot: set to None once consumed.
-    let mut reparent_at: Option<Instant> = if mode == Mode::TopLevel {
-        None // A0 never reparents
-    } else {
-        Some(now + REPARENT_DELAY)
-    };
-    let mut next_guardian_at = now + guardian_interval;
-    let mut next_status_at = now + STATUS_INTERVAL;
-
-    // Diagnostic counters for the trace log.
-    // Diagnostic: confirm WaitUntil wakes via ResumeTimeReached (log once).
-    let mut trace_logged = false;
-
-    let webview = webview;
-    event_loop.run(move |event, _, control_flow| {
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
-                return;
-            }
-            Event::NewEvents(start_cause) => {
-                // Diagnostic: log StartCause once to confirm WaitUntil wakes
-                // via ResumeTimeReached (not just Poll-like spam).
-                if !trace_logged {
-                    if let tao::event::StartCause::ResumeTimeReached { .. } = start_cause {
-                        println!("[trace] NewEvents: ResumeTimeReached (WaitUntil working)");
-                        trace_logged = true;
-                    }
-                }
-            }
-            Event::MainEventsCleared => {
-                let now = Instant::now();
-
-                // One-shot reparent. Only consume the one-shot on full success;
-                // on failure reschedule +1s so it retries (proper backoff lands
-                // with the recovery state machine).
-                if let Some(deadline) = reparent_at {
-                    if now >= deadline {
-                        let t0 = Instant::now();
-                        match do_reparent(hwnd, &target, mode, &webview) {
-                            Ok(()) => {
-                                println!(
-                                    "[trace] reparent fired at {:?} (scheduled at start+{:?}) — OK",
-                                    t0, REPARENT_DELAY
-                                );
-                                reparent_at = None; // consume one-shot
-                            }
-                            Err(e) => {
-                                eprintln!("[trace] reparent failed: {} — retry in 1s", e);
-                                reparent_at = Some(now + Duration::from_secs(1));
-                            }
-                        }
-                    }
-                }
-
-                // Guardian tick.
-                if now >= next_guardian_at {
-                    // Advance past now in a loop so a stale deadline doesn't
-                    // immediately re-trigger on the next MainEventsCleared.
-                    while next_guardian_at <= now {
-                        next_guardian_at += guardian_interval;
-                    }
-                    guardian_tick(hwnd, target.parent);
-                }
-
-                // Periodic status log.
-                if now >= next_status_at {
-                    while next_status_at <= now {
-                        next_status_at += STATUS_INTERVAL;
-                    }
-                    log_window_state(hwnd, "alive");
-                }
-
-                // Compute next deadline = min of remaining absolute deadlines.
-                let next = [reparent_at, Some(next_guardian_at), Some(next_status_at)]
-                    .into_iter()
-                    .flatten()
-                    .min();
-                match next {
-                    Some(deadline) => {
-                        // Advance if already past (defensive; the per-task
-                        // loops above should have prevented this).
-                        let deadline = if deadline <= now { now } else { deadline };
-                        *control_flow = ControlFlow::WaitUntil(deadline);
-                    }
-                    // No future tasks (e.g. A0 with reparent_at=None after
-                    // guardian/status also exhausted — shouldn't happen, but
-                    // fall back to a long Wait rather than busy-loop).
-                    None => *control_flow = ControlFlow::Wait,
-                }
-            }
-            _ => {}
-        }
-    });
-}
-
 /// A1/A2 reparent: move the top-level window into the desktop target.
+///
+/// Per Codex review (msg_2zt1fuY §6): `SWP_SHOWWINDOW` is removed — the
+/// candidate window is created hidden and only `set_visible(true)` after the
+/// full attach + bounds succeed (caller's responsibility). A failure here
+/// must not flash a blank window.
 fn do_reparent(
-    hwnd: isize,
+    hwnd_isize: isize,
     target: &DesktopTarget,
     mode: Mode,
-    webview: &wry::WebView,
+    webview: &WebView,
 ) -> anyhow::Result<()> {
     use windows::Win32::Foundation::{GetLastError, SetLastError, HWND};
     use windows::Win32::UI::WindowsAndMessaging::{
         GetClientRect, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, SetWindowPos, HWND_BOTTOM,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_LONG_PTR_INDEX, WS_CAPTION,
-        WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
-        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-        WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_CHILD,
+        WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+        WS_THICKFRAME, WS_VISIBLE,
     };
     const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
     const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
 
     println!("[reparent] mode={:?} starting", mode);
-    log_window_state(hwnd, "before reparent");
+    log_window_state(hwnd_isize, "before reparent");
 
-    let hwnd_isize = hwnd; // keep isize copy for post-unsafe-block logging
-    let hwnd = HWND(hwnd as _);
+    let hwnd = HWND(hwnd_isize as _);
     unsafe {
         // GWL_STYLE: clear ALL non-client-area styles (caption/sysmenu/thickframe
         // + minimize/maximize boxes) — these are what produce the visible
@@ -344,6 +922,8 @@ fn do_reparent(
         let ph = parent_client.bottom - parent_client.top;
         println!("[reparent] WorkerW GetClientRect = {}x{}", pw, ph);
 
+        // SWP_SHOWWINDOW removed (Codex §6): the candidate is hidden and the
+        // caller shows it only after attach + bounds fully succeed.
         SetWindowPos(
             hwnd,
             Some(HWND_BOTTOM),
@@ -351,7 +931,7 @@ fn do_reparent(
             0,
             pw,
             ph,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+            SWP_NOACTIVATE | SWP_FRAMECHANGED,
         )
         .map_err(|e| {
             let le = GetLastError();
@@ -367,7 +947,7 @@ fn do_reparent(
     // so no double-scaling.
     let mut host_client = windows::Win32::Foundation::RECT::default();
     unsafe {
-        GetClientRect(HWND(hwnd_isize as _), &mut host_client).map_err(|e| {
+        GetClientRect(hwnd, &mut host_client).map_err(|e| {
             let le = GetLastError();
             anyhow::anyhow!("GetClientRect(host) failed: {} (GetLastError={:?})", e, le)
         })?;
@@ -384,7 +964,7 @@ fn do_reparent(
     println!("[reparent] host GetClientRect = {}x{}", cw, ch);
 
     webview
-        .set_bounds(wry::Rect {
+        .set_bounds(Rect {
             position: tao::dpi::PhysicalPosition::new(0.0, 0.0).into(),
             size: tao::dpi::PhysicalSize::new(cw as f64, ch as f64).into(),
         })
@@ -395,6 +975,14 @@ fn do_reparent(
     println!("[reparent] mode={:?} done", mode);
     log_full_geometry(hwnd_isize, "after reparent (full geom)");
     Ok(())
+}
+
+// Allow HostRuntime to hand out a &WebView without moving it out, used by
+// on_page_load_finished when calling do_reparent / set_webview_bounds_from_host.
+impl HostRuntime {
+    fn webview_ref(&self) -> &WebView {
+        &self.webview
+    }
 }
 
 /// Log a window's HWND, parent, style, exstyle, rect, and direct children.
@@ -478,15 +1066,7 @@ fn class_name(hwnd: windows::Win32::Foundation::HWND) -> String {
 }
 
 /// Primary monitor size in physical pixels via GetSystemMetrics.
-/// SM_CXSCREEN=0, SM_CYSCREEN=1. This is the actual display resolution
-/// (e.g. 1707x1067 on this machine), NOT the WorkerW rect (which may include
-/// virtual-display extension). Used for both window creation and webview bounds
-/// so the renderer fills the screen exactly with no clipping.
-/// Remove WS_CAPTION/WS_THICKFRAME/WS_SYSMENU and force a frame change so the
-/// window has ZERO non-client area. tao's with_decorations(false) leaves these
-/// styles in place on Windows, giving the window ~11px insets at DPI 1.5x that
-/// offset WRY_WEBVIEW from (0,0). Must be called before WebView2 creation so
-/// the webview anchors at the true client origin.
+/// SM_CXSCREEN=0, SM_CYSCREEN=1. This is the actual display resolution.
 fn primary_screen_size() -> (i32, i32) {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SYSTEM_METRICS_INDEX};
     const SM_CXSCREEN: SYSTEM_METRICS_INDEX = SYSTEM_METRICS_INDEX(0);
@@ -497,8 +1077,7 @@ fn primary_screen_size() -> (i32, i32) {
 }
 
 /// Get the DPI for a window (via Win32 GetDpiForWindow). Falls back to system
-/// DPI (96) if the call fails. Used to convert physical screen px → logical px
-/// for wry's set_bounds (which expects logical sizes and scales internally).
+/// DPI (96) if the call fails.
 fn dpi_for_hwnd(hwnd_isize: isize) -> u32 {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -586,28 +1165,5 @@ fn log_full_geometry(hwnd_isize: isize, label: &str) {
             "OTHER"
         };
         println!("  DPI awareness = {}", aware);
-    }
-}
-
-/// Minimal guardian: healthy path is a no-op.
-fn guardian_tick(hwnd: isize, expected_parent: windows::Win32::Foundation::HWND) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, IsWindow};
-
-    let hwnd = HWND(hwnd as _);
-    if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
-        eprintln!("[guardian] host window invalid");
-        return;
-    }
-    let parent = desktop::true_parent(hwnd);
-    if parent != expected_parent {
-        let mut cls = [0u16; 64];
-        unsafe { GetClassNameW(parent, &mut cls) };
-        eprintln!(
-            "[guardian] parent changed: expected 0x{:x} got 0x{:x} ({})",
-            expected_parent.0 as usize,
-            parent.0 as usize,
-            String::from_utf16_lossy(&cls)
-        );
     }
 }

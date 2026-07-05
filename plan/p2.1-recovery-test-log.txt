@@ -1,0 +1,617 @@
+[host] starting; renderer=apps/desktop/dist/octos mode=ReparentClickThrough
+[desktop] Progman = HWND(0x1011a)
+[desktop] 0x052C sent for new shell identity progman=0x1011a pid=6056
+[desktop] Progman EX=0x80 NOREDIR=false raised=false
+[desktop] DefView host = Some(HWND(0x109a8)), DefView = Some(HWND(0x1011c)), WorkerW count = 14
+[desktop]   WorkerW HWND(0x10328) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x102ba) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x3010c) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x1027c) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x1016c) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x20206) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x1016a) visible=true area=484px² def_view_child=false
+[desktop]   WorkerW HWND(0x10136) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x10130) visible=false area=0px² def_view_child=false
+[desktop]   WorkerW HWND(0x1012e) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x10114) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x10112) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x109a8) visible=true area=4096000px² def_view_child=true
+[desktop]   WorkerW HWND(0x109aa) visible=true area=4096000px² def_view_child=false
+[desktop] Classic: full-screen WorkerW sibling HWND(0x109aa) (area=4096000)
+[recovery] desktop variant = Classic, parent = HWND(0x109aa), insert_after = None
+[recovery] candidate window created hidden; hwnd=0xf098e; undecorated_shadow=false
+[recovery] WebView2 created; loaded wallpaper://localhost
+[recovery] candidate gen=1 built → WaitingForPage (timeout 12s)
+[reparent] mode=ReparentClickThrough starting
+[state before reparent] hwnd=0xf098e style=0x4c80000 ex=0x40110 parent=0x10010(#32769) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=false rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=false rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=false rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=false rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=false rect=0,0,2816x2048
+[reparent] GWL_STYLE 0x4c80000 -> 0x56000000
+[reparent] GWL_EXSTYLE 0x40010 -> 0x80000b0
+[reparent] SetParent OK; prev parent = HWND(0x10010)
+[reparent] WorkerW GetClientRect = 2560x1600
+[reparent] SetWindowPos HWND_BOTTOM 2560x1600
+[reparent] host GetClientRect = 2560x1600
+[reparent] webview.set_bounds physical 2560x1600
+[state after reparent] hwnd=0xf098e style=0x56000000 ex=0x80000b0 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[reparent] mode=ReparentClickThrough done
+[geom after reparent (full geom)] hwnd=0xf098e
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[recovery] ✓ generation 1 active (Running)
+[state after attach] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[geom after attach (full geom)] hwnd=0xf098e
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[renderer] wallpaper://localhost/favicon.ico: file "\\\\?\\F:\\newidea\\wallpaper-ai\\apps\\desktop\\dist\\octos\\favicon.ico" not readable
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xf098e style=0x14c80000 ex=0x40110 parent=0x109aa(WorkerW) rect=0,0,2560,1600
+  child 0xb0b3e WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0xa0c0c Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x2c0c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x450ac2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c3e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[recovery] requested: host-hwnd-invalid (token=2)
+[recovery] RecoveryRequested token=2 reason=host-hwnd-invalid
+[recovery] dropping previous runtime gen=1
+[recovery] probe failed: Progman not found → Backoff
+[recovery] → Backoff (token=2, attempt=1, retry in 500ms)
+[recovery] Backoff expired → RecoverQueued (token=3, attempt=1)
+[desktop] Progman = HWND(0x460ac2)
+[desktop] 0x052C sent for new shell identity progman=0x460ac2 pid=27524
+[desktop] Progman EX=0x80 NOREDIR=false raised=false
+[desktop] DefView host = Some(HWND(0x20258)), DefView = Some(HWND(0x209aa)), WorkerW count = 9
+[desktop]   WorkerW HWND(0x60c28) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x20240) visible=true area=484px² def_view_child=false
+[desktop]   WorkerW HWND(0x2026a) visible=false area=0px² def_view_child=false
+[desktop]   WorkerW HWND(0x20b80) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x203e2) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x9d0aa4) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x30378) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x20258) visible=true area=4096000px² def_view_child=true
+[desktop]   WorkerW HWND(0x20254) visible=true area=4096000px² def_view_child=false
+[desktop] Classic: full-screen WorkerW sibling HWND(0x20254) (area=4096000)
+[recovery] desktop variant = Classic, parent = HWND(0x20254), insert_after = None
+[recovery] candidate window created hidden; hwnd=0x20232; undecorated_shadow=false
+[recovery] WebView2 created; loaded wallpaper://localhost
+[recovery] candidate gen=2 built → WaitingForPage (timeout 12s)
+[reparent] mode=ReparentClickThrough starting
+[state before reparent] hwnd=0x20232 style=0x4c80000 ex=0x40110 parent=0x10010(#32769) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=false rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=false rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=false rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=false rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=false rect=0,0,2816x2048
+[reparent] GWL_STYLE 0x4c80000 -> 0x56000000
+[reparent] GWL_EXSTYLE 0x40010 -> 0x80000b0
+[reparent] SetParent OK; prev parent = HWND(0x10010)
+[reparent] WorkerW GetClientRect = 2560x1600
+[reparent] SetWindowPos HWND_BOTTOM 2560x1600
+[reparent] host GetClientRect = 2560x1600
+[reparent] webview.set_bounds physical 2560x1600
+[state after reparent] hwnd=0x20232 style=0x56000000 ex=0x80000b0 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[reparent] mode=ReparentClickThrough done
+[geom after reparent (full geom)] hwnd=0x20232
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[recovery] ✓ generation 2 active (Running)
+[state after attach] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[geom after attach (full geom)] hwnd=0x20232
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[renderer] wallpaper://localhost/favicon.ico: file "\\\\?\\F:\\newidea\\wallpaper-ai\\apps\\desktop\\dist\\octos\\favicon.ico" not readable
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x20232 style=0x14c80000 ex=0x40110 parent=0x20254(WorkerW) rect=0,0,2560,1600
+  child 0x203fa WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x20496 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x70a18 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x20296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x20170 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[recovery] requested: parent-invalid (token=4)
+[recovery] RecoveryRequested token=4 reason=parent-invalid
+[recovery] dropping previous runtime gen=2
+[recovery] probe failed: Progman not found → Backoff
+[recovery] → Backoff (token=4, attempt=1, retry in 500ms)
+[recovery] Backoff expired → RecoverQueued (token=5, attempt=1)
+[recovery] probe failed: Progman not found → Backoff
+[recovery] → Backoff (token=5, attempt=2, retry in 1s)
+[recovery] Backoff expired → RecoverQueued (token=6, attempt=2)
+[desktop] Progman = HWND(0xb0c16)
+[desktop] 0x052C sent for new shell identity progman=0xb0c16 pid=70660
+[desktop] Progman EX=0x80 NOREDIR=false raised=false
+[desktop] DefView host = Some(HWND(0x30158)), DefView = Some(HWND(0x3016c)), WorkerW count = 9
+[desktop]   WorkerW HWND(0x210afe) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0xe09a2) visible=true area=484px² def_view_child=false
+[desktop]   WorkerW HWND(0x340ca6) visible=false area=0px² def_view_child=false
+[desktop]   WorkerW HWND(0x2f0aa0) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x1b079a) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x200c74) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x5044a) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x30158) visible=true area=4096000px² def_view_child=true
+[desktop]   WorkerW HWND(0x4015a) visible=true area=4096000px² def_view_child=false
+[desktop] Classic: full-screen WorkerW sibling HWND(0x4015a) (area=4096000)
+[recovery] desktop variant = Classic, parent = HWND(0x4015a), insert_after = None
+[recovery] candidate window created hidden; hwnd=0xe0a68; undecorated_shadow=false
+[recovery] WebView2 created; loaded wallpaper://localhost
+[recovery] candidate gen=3 built → WaitingForPage (timeout 12s)
+[reparent] mode=ReparentClickThrough starting
+[state before reparent] hwnd=0xe0a68 style=0x4c80000 ex=0x40110 parent=0x10010(#32769) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=false rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=false rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=false rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=false rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=false rect=0,0,2816x2048
+[reparent] GWL_STYLE 0x4c80000 -> 0x56000000
+[reparent] GWL_EXSTYLE 0x40010 -> 0x80000b0
+[reparent] SetParent OK; prev parent = HWND(0x10010)
+[reparent] WorkerW GetClientRect = 2560x1600
+[reparent] SetWindowPos HWND_BOTTOM 2560x1600
+[reparent] host GetClientRect = 2560x1600
+[reparent] webview.set_bounds physical 2560x1600
+[state after reparent] hwnd=0xe0a68 style=0x56000000 ex=0x80000b0 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[reparent] mode=ReparentClickThrough done
+[geom after reparent (full geom)] hwnd=0xe0a68
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[recovery] ✓ generation 3 active (Running)
+[state after attach] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[geom after attach (full geom)] hwnd=0xe0a68
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[renderer] wallpaper://localhost/favicon.ico: file "\\\\?\\F:\\newidea\\wallpaper-ai\\apps\\desktop\\dist\\octos\\favicon.ico" not readable
+[state alive] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xe0a68 style=0x14c80000 ex=0x40110 parent=0x4015a(WorkerW) rect=0,0,2560,1600
+  child 0x3017a WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x50304 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x301a8 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x301da Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x1d0c08 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[recovery] requested: host-hwnd-invalid (token=7)
+[recovery] RecoveryRequested token=7 reason=host-hwnd-invalid
+[recovery] dropping previous runtime gen=3
+[recovery] probe failed: Progman not found → Backoff
+[recovery] → Backoff (token=7, attempt=1, retry in 500ms)
+[recovery] Backoff expired → RecoverQueued (token=8, attempt=1)
+[recovery] probe failed: Progman not found → Backoff
+[recovery] → Backoff (token=8, attempt=2, retry in 1s)
+[recovery] Backoff expired → RecoverQueued (token=9, attempt=2)
+[desktop] Progman = HWND(0x5015a)
+[desktop] 0x052C sent for new shell identity progman=0x5015a pid=73716
+[desktop] Progman EX=0x80 NOREDIR=false raised=false
+[desktop] DefView host = Some(HWND(0x50190)), DefView = Some(HWND(0x90088)), WorkerW count = 9
+[desktop]   WorkerW HWND(0x1300e2) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0xc01ba) visible=true area=484px² def_view_child=false
+[desktop]   WorkerW HWND(0x40246) visible=false area=0px² def_view_child=false
+[desktop]   WorkerW HWND(0xc0ada) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x501d8) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x120af4) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x90218) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x50190) visible=true area=4096000px² def_view_child=true
+[desktop]   WorkerW HWND(0x701d6) visible=true area=4096000px² def_view_child=false
+[desktop] Classic: full-screen WorkerW sibling HWND(0x701d6) (area=4096000)
+[recovery] desktop variant = Classic, parent = HWND(0x701d6), insert_after = None
+[recovery] candidate window created hidden; hwnd=0xc09f8; undecorated_shadow=false
+[recovery] WebView2 created; loaded wallpaper://localhost
+[recovery] candidate gen=4 built → WaitingForPage (timeout 12s)
+[reparent] mode=ReparentClickThrough starting
+[state before reparent] hwnd=0xc09f8 style=0x4c80000 ex=0x40110 parent=0x10010(#32769) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=false rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=false rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=false rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=false rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=false rect=0,0,2816x2048
+[reparent] GWL_STYLE 0x4c80000 -> 0x56000000
+[reparent] GWL_EXSTYLE 0x40010 -> 0x80000b0
+[reparent] SetParent OK; prev parent = HWND(0x10010)
+[reparent] WorkerW GetClientRect = 2560x1600
+[reparent] SetWindowPos HWND_BOTTOM 2560x1600
+[reparent] host GetClientRect = 2560x1600
+[reparent] webview.set_bounds physical 2560x1600
+[state after reparent] hwnd=0xc09f8 style=0x56000000 ex=0x80000b0 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[reparent] mode=ReparentClickThrough done
+[geom after reparent (full geom)] hwnd=0xc09f8
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[recovery] ✓ generation 4 active (Running)
+[state after attach] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[geom after attach (full geom)] hwnd=0xc09f8
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[renderer] wallpaper://localhost/favicon.ico: file "\\\\?\\F:\\newidea\\wallpaper-ai\\apps\\desktop\\dist\\octos\\favicon.ico" not readable
+[state alive] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0xc09f8 style=0x14c80000 ex=0x40110 parent=0x701d6(WorkerW) rect=0,0,2560,1600
+  child 0x500c8 WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x100b98 Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x340c00 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x900c2 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x401f8 Intermediate D3D Window vis=true rect=0,0,2560x1600
+[recovery] requested: host-hwnd-invalid (token=10)
+[recovery] RecoveryRequested token=10 reason=host-hwnd-invalid
+[recovery] dropping previous runtime gen=4
+[recovery] probe failed: Progman not found → Backoff
+[recovery] → Backoff (token=10, attempt=1, retry in 500ms)
+[recovery] Backoff expired → RecoverQueued (token=11, attempt=1)
+[desktop] Progman = HWND(0x800d0)
+[desktop] 0x052C sent for new shell identity progman=0x800d0 pid=58660
+[desktop] Progman EX=0x80 NOREDIR=false raised=false
+[desktop] DefView host = Some(HWND(0x700c4)), DefView = Some(HWND(0x160c1c)), WorkerW count = 9
+[desktop]   WorkerW HWND(0x60346) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0xe02a4) visible=true area=484px² def_view_child=false
+[desktop]   WorkerW HWND(0x80cb0) visible=false area=0px² def_view_child=false
+[desktop]   WorkerW HWND(0x50cf0) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0xa0272) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x801d6) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x1202f0) visible=false area=11312px² def_view_child=false
+[desktop]   WorkerW HWND(0x700c4) visible=true area=4096000px² def_view_child=true
+[desktop]   WorkerW HWND(0x801fc) visible=true area=4096000px² def_view_child=false
+[desktop] Classic: full-screen WorkerW sibling HWND(0x801fc) (area=4096000)
+[recovery] desktop variant = Classic, parent = HWND(0x801fc), insert_after = None
+[recovery] candidate window created hidden; hwnd=0x70176; undecorated_shadow=false
+[recovery] WebView2 created; loaded wallpaper://localhost
+[recovery] candidate gen=5 built → WaitingForPage (timeout 12s)
+[reparent] mode=ReparentClickThrough starting
+[state before reparent] hwnd=0x70176 style=0x4c80000 ex=0x40110 parent=0x10010(#32769) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=false rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=false rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=false rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=false rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=false rect=0,0,2816x2048
+[reparent] GWL_STYLE 0x4c80000 -> 0x56000000
+[reparent] GWL_EXSTYLE 0x40010 -> 0x80000b0
+[reparent] SetParent OK; prev parent = HWND(0x10010)
+[reparent] WorkerW GetClientRect = 2560x1600
+[reparent] SetWindowPos HWND_BOTTOM 2560x1600
+[reparent] host GetClientRect = 2560x1600
+[reparent] webview.set_bounds physical 2560x1600
+[state after reparent] hwnd=0x70176 style=0x56000000 ex=0x80000b0 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[reparent] mode=ReparentClickThrough done
+[geom after reparent (full geom)] hwnd=0x70176
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[recovery] ✓ generation 5 active (Running)
+[state after attach] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[geom after attach (full geom)] hwnd=0x70176
+  GetWindowRect       = 0,0 2560x1600
+  GetClientRect       = 2560x1600
+  ClientToScreen(0,0) = 0,0
+  DWMWA_EXTENDED_FRAME_BOUNDS = 0,0 0x0
+  DPI = 144 (scale 1.50x)
+  DPI awareness = PER_MONITOR_V2
+[renderer] wallpaper://localhost/favicon.ico: file "\\\\?\\F:\\newidea\\wallpaper-ai\\apps\\desktop\\dist\\octos\\favicon.ico" not readable
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2816x2048
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
+[state alive] hwnd=0x70176 style=0x14c80000 ex=0x40110 parent=0x801fc(WorkerW) rect=0,0,2560,1600
+  child 0x5011c WRY_WEBVIEW vis=true rect=0,0,2560x1600
+  child 0x5053e Chrome_WidgetWin_0 vis=true rect=0,0,2560x1600
+  child 0x130cc2 Chrome_WidgetWin_1 vis=true rect=0,0,2560x1600
+  child 0x60296 Chrome_RenderWidgetHostHWND vis=true rect=0,0,2561x1601
+  child 0x8012e Intermediate D3D Window vis=true rect=0,0,2560x1600
