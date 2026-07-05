@@ -3,6 +3,7 @@ name = "wallpaper-host"
 version = "0.1.0"
 edition = "2021"
 description = "Native WebView2 wallpaper host for WallpaperAI"
+build = "build.rs"
 publish = false
 
 [[bin]]

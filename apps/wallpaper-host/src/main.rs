@@ -97,8 +97,13 @@ struct Args {
     #[arg(long)]
     renderer: String,
 
-    /// Diagnostic mode.
-    #[arg(long, value_enum, default_value_t = Mode::TopLevel)]
+    /// Diagnostic mode. REQUIRED — there is no default. `TopLevel` (A0) is a
+    /// diagnostic baseline that shows a frameless top-level window on the
+    /// desktop layer; it is NOT the product wallpaper mode. Forcing the caller
+    /// to pick a mode explicitly prevents accidentally running A0 in
+    /// production (which a Codex review identified as a likely cause of an
+    /// unattributable "captioned window" screenshot).
+    #[arg(long, value_enum)]
     mode: Mode,
 
     /// Watchdog interval for the guardian tick, in milliseconds (min 50).
@@ -141,6 +146,10 @@ enum RecoveryReason {
     ParentMismatch,
     /// Page did not fire `Finished` within `page_timeout_secs`.
     PageTimeout,
+    /// Steady-state style guardian detected the window's GWL_STYLE drifted
+    /// from what we set at attach time (e.g. WS_CAPTION re-appeared, WS_CHILD
+    /// cleared). Recovery hides the window immediately and rebuilds.
+    StyleDrift,
     /// Initial startup / first generation.
     Startup,
 }
@@ -152,6 +161,7 @@ impl RecoveryReason {
             RecoveryReason::ParentInvalid => "parent-invalid",
             RecoveryReason::ParentMismatch => "parent-mismatch",
             RecoveryReason::PageTimeout => "page-timeout",
+            RecoveryReason::StyleDrift => "style-drift",
             RecoveryReason::Startup => "startup",
         }
     }
@@ -281,11 +291,36 @@ fn backoff_delay(attempt: u32) -> Duration {
 /// `guardian_interval_ms` and the status line is for offline log analysis.
 const STATUS_INTERVAL: Duration = Duration::from_secs(3);
 
+/// Build-time injected git short hash + UTC build timestamp, so every running
+/// binary can be traced to a specific commit via its startup banner (per
+/// Codex BLOCKED review: a screenshot of a regressed window could not be
+/// attributed to a specific instance).
+///
+/// We use `match` instead of `Option::unwrap_or` because the latter is not
+/// yet stable in `const` contexts.
+const GIT_HASH: &str = match option_env!("WALLPAPER_HOST_GIT_HASH") {
+    Some(s) => s,
+    None => "unknown",
+};
+const BUILD_TIME: &str = match option_env!("WALLPAPER_HOST_BUILD_TIME") {
+    Some(s) => s,
+    None => "unknown",
+};
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    // First log line is the traceability tuple. A screenshot + this line is
+    // sufficient to attribute a visible window to a specific binary/commit.
     println!(
-        "[host] starting; renderer={} mode={:?}",
-        args.renderer, args.mode
+        "[host] wallpaper-host commit={} build={} pid={} mode={:?}",
+        GIT_HASH,
+        BUILD_TIME,
+        std::process::id(),
+        args.mode
+    );
+    println!(
+        "[host] renderer={} guardian_interval_ms={} page_timeout_secs={}",
+        args.renderer, args.guardian_interval_ms, args.page_timeout_secs
     );
 
     let root = RendererRoot::new(&args.renderer)?;
@@ -787,26 +822,78 @@ fn on_page_load_finished(state: &mut HostState, ctx: &Ctx, token: u64, url: Stri
     }
 }
 
-/// Guardian: only runs in `Running`. For desktop-attaching modes (A1/A2),
-/// checks (a) host window still valid, (b) parent still valid, (c) parent
-/// unchanged. For A0 (top-level, no SetParent) we only check the host window
-/// itself — there is no desktop parent to monitor, so the parent checks would
-/// always mismatch and spuriously trigger recovery.
+/// Guardian: only runs in `Running`. Checks (per Codex review):
+///   (a) host HWND still valid
+///   (b) parent still valid + matches expected (attach modes only)
+///   (c) GWL_STYLE has not drifted from the frameless configuration we set
+///       at attach time — if WS_CAPTION re-appears or WS_CHILD clears, hide
+///       the window immediately and rebuild. This is both loss-stopping (no
+///       captioned window stays on screen) and diagnostic (it tells us if
+///       something rewrites style post-show).
 fn run_guardian(state: &mut HostState, attaches_to_desktop: bool) {
-    let (hwnd, expected_parent) = match state.runtime.as_ref() {
-        Some(r) => (r.window.hwnd() as isize, r.target.parent),
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, IsWindow, IsWindowVisible, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_CHILD,
+        WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+    };
+    const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
+
+    let (hwnd, expected_parent, window_undecorated_shadow) = match state.runtime.as_ref() {
+        Some(r) => (
+            r.window.hwnd() as isize,
+            r.target.parent,
+            r.window.has_undecorated_shadow(),
+        ),
         None => return,
     };
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::IsWindow;
 
     let host_hwnd = HWND(hwnd as _);
     if !unsafe { IsWindow(Some(host_hwnd)) }.as_bool() {
         request_recovery(state, RecoveryReason::HostWindowInvalid);
         return;
     }
+
+    // Steady-state style check: applies to BOTH A0 and attach modes. Any drift
+    // from the frameless config means something rewrote our style edits after
+    // show (e.g. a later tao call). Hide immediately + rebuild.
+    let style = unsafe { GetWindowLongPtrW(host_hwnd, GWLP_STYLE_IDX) } as u32;
+    let nc_bits = WS_CAPTION.0 | WS_THICKFRAME.0 | WS_POPUP.0 | WS_SYSMENU.0;
+    let visible = unsafe { IsWindowVisible(host_hwnd) }.as_bool();
+    let style_ok = (style & nc_bits) == 0
+        && if attaches_to_desktop {
+            style & WS_CHILD.0 != 0
+        } else {
+            style & WS_CHILD.0 == 0
+        };
+    let shadow_ok = !window_undecorated_shadow;
+    let visible_ok = visible; // Running must be visible
+
+    if !(style_ok && shadow_ok && visible_ok) {
+        eprintln!(
+            "[guardian] STYLE DRIFT detected — hiding window immediately + rebuild. style=0x{:x} (NC={} CHILD={} vis={} undecorated_shadow={})",
+            style,
+            style & nc_bits != 0,
+            style & WS_CHILD.0 != 0,
+            visible,
+            window_undecorated_shadow,
+        );
+        // Snapshot the drifting state for offline analysis, then hide + recover.
+        if let Some(rt) = state.runtime.as_ref() {
+            log_window_state(rt.window.hwnd() as isize, "before style-drift recovery");
+            log_full_geometry(rt.window.hwnd() as isize, "before style-drift recovery (geom)");
+        }
+        // Force-hide the window so a captioned/incorrect surface does not
+        // stay on screen while we rebuild. SW_HIDE touches only WS_VISIBLE.
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        unsafe {
+            let _ = ShowWindow(host_hwnd, SW_HIDE);
+        }
+        request_recovery(state, RecoveryReason::StyleDrift);
+        return;
+    }
+
     if !attaches_to_desktop {
-        // A0: no desktop parent to monitor. Healthy.
+        // A0: no desktop parent to monitor. Style check above already covered.
         return;
     }
     if !unsafe { IsWindow(Some(expected_parent)) }.as_bool() {
