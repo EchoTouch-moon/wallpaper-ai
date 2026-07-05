@@ -228,6 +228,10 @@ struct HostState {
     /// on every rebuild start; a `PageLoadFinished` whose token no longer
     /// matches the current `WaitingForPage` token is ignored.
     next_token: u64,
+    /// One-shot: print the post-Running diagnostic checkpoint (#5) + system
+    /// window enum the first time the status timer fires after entering
+    /// Running. Reset to true each time we transition into Running.
+    running_diag_pending: bool,
 }
 
 impl HostState {
@@ -312,6 +316,7 @@ fn main() -> anyhow::Result<()> {
         proxy: proxy.clone(),
         active_generation: 0,
         next_token: first_token + 1,
+        running_diag_pending: false,
     };
 
     let ctx = Ctx {
@@ -423,7 +428,23 @@ fn schedule(
                 while state.next_status_at <= now {
                     state.next_status_at += STATUS_INTERVAL;
                 }
-                if let Some(rt) = state.runtime.as_ref() {
+                if state.running_diag_pending {
+                    // Diagnostic checkpoint #5: ~1s into Running. Full
+                    // style/geometry re-snapshot + system window enum to
+                    // confirm only one host process / one valid host HWND.
+                    state.running_diag_pending = false;
+                    if let Some(rt) = state.runtime.as_ref() {
+                        diag::snapshot(
+                            "5 Running +1s",
+                            state,
+                            ctx,
+                            rt.window.hwnd() as isize,
+                            rt.generation,
+                            0,
+                        );
+                    }
+                    diag::enumerate_wallpaper_windows();
+                } else if let Some(rt) = state.runtime.as_ref() {
                     log_window_state(rt.window.hwnd() as isize, "alive");
                 }
             }
@@ -578,6 +599,16 @@ fn build_candidate(
         "[recovery] candidate gen={} built → WaitingForPage (timeout {:?})",
         candidate_generation, ctx.page_timeout
     );
+
+    // Diagnostic checkpoint #1: candidate window built (hidden).
+    diag::snapshot(
+        "1 candidate built (hidden)",
+        state,
+        ctx,
+        hwnd as isize,
+        candidate_generation,
+        token,
+    );
 }
 
 /// `PageLoadEvent::Finished` arrived for a candidate. Validate token + URL,
@@ -619,33 +650,87 @@ fn on_page_load_finished(state: &mut HostState, ctx: &Ctx, token: u64, url: Stri
         }
     };
 
+    // Diagnostic checkpoint #2: PageLoadFinished received, pre-attach.
+    diag::snapshot(
+        "2 PageLoadFinished pre-attach",
+        state,
+        ctx,
+        hwnd,
+        generation,
+        token,
+    );
+
     // For A0 (top-level) we skip SetParent entirely — there is no desktop
-    // attach. We still set bounds from the host client rect so the WebView
-    // fills the window.
+    // attach. We strip NC styles + set bounds from the host client rect so
+    // the WebView fills the window framelessly.
     let attach_result = if ctx.args.mode.attaches_to_desktop() {
         do_reparent(hwnd, &target, ctx.args.mode, state.runtime.as_ref().unwrap().webview_ref())
     } else {
-        set_webview_bounds_from_host(hwnd, state.runtime.as_ref().unwrap().webview_ref())
+        prepare_toplevel_for_show(hwnd, state.runtime.as_ref().unwrap().webview_ref())
     };
 
     match attach_result {
         Ok(()) => {
-            // Surface + bounds OK. Make it visible and commit the generation.
-            if let Some(rt) = state.runtime.as_ref() {
-                rt.window.set_visible(true);
+            // Diagnostic checkpoint #3: post style/SetParent/SWP, pre-show.
+            diag::snapshot(
+                "3 pre-show post-attach",
+                state,
+                ctx,
+                hwnd,
+                generation,
+                token,
+            );
+
+            // Fail-closed invariant: NEVER show a window that still carries
+            // NC chrome or is not properly parented. If any check fails we
+            // tear the candidate down and back off instead of flashing a
+            // framed window onto the desktop (per Codex BLOCKED review).
+            if let Err(reason) = show_invariant_check(hwnd, &target, ctx.args.mode) {
+                eprintln!(
+                    "[recovery] show invariant FAILED: {} → cleanup + Backoff",
+                    reason
+                );
+                if let Some(old) = state.runtime.take() {
+                    old.destroy();
+                }
+                state.lifecycle = Lifecycle::Backoff {
+                    token,
+                    attempt: attempt + 1,
+                    retry_at: Instant::now() + backoff_delay(attempt + 1),
+                };
+                return;
             }
+
+            // Show via Win32 ShowWindow(SW_SHOWNOACTIVATE) — NOT tao's
+            // window.set_visible(true). The latter routes through tao's
+            // WindowState::apply_diff, which recomputes GWL_STYLE via
+            // to_window_styles() and overwrites our do_reparent style edits
+            // (re-adding WS_CAPTION | WS_SYSMENU and clearing WS_CHILD,
+            // regressing the very NC chrome we just stripped). ShowWindow
+            // bypasses that entirely.
+            show_window_noactivate(hwnd);
+
+            // Diagnostic checkpoint #4: immediately post-show.
+            diag::snapshot(
+                "4 post-show",
+                state,
+                ctx,
+                hwnd,
+                generation,
+                token,
+            );
+
             state.active_generation = generation;
             state.lifecycle = Lifecycle::Running;
+            // One-shot deadline 1s into Running for the final checkpoint #5
+            // (separate from the guardian cadence so it fires once).
+            state.next_status_at = Instant::now() + Duration::from_secs(1);
             state.next_guardian_at = Instant::now() + ctx.guardian_interval;
-            state.next_status_at = Instant::now() + STATUS_INTERVAL;
+            state.running_diag_pending = true;
             println!(
                 "[recovery] ✓ generation {} active (Running)",
                 state.active_generation
             );
-            if let Some(rt) = state.runtime.as_ref() {
-                log_window_state(rt.window.hwnd() as isize, "after attach");
-                log_full_geometry(rt.window.hwnd() as isize, "after attach (full geom)");
-            }
         }
         Err(e) => {
             eprintln!("[recovery] attach failed: {} → cleanup + Backoff", e);
@@ -811,15 +896,56 @@ fn build_window(
         .build(target)
 }
 
-/// Size the WebView to the host's actual client rect. Used for A0
-/// (top-level) where there is no SetParent. Returns Err if the rect is
-/// non-positive or set_bounds fails — propagated to the recovery state
-/// machine so a failure is treated as an attach failure (Backoff).
-fn set_webview_bounds_from_host(hwnd_isize: isize, webview: &WebView) -> anyhow::Result<()> {
+/// A0 (top-level) preparation: strip the NC chrome tao installs by default
+/// (WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_POPUP) and apply the
+/// frameless no-activate tool-window ex-style, then size the WebView to the
+/// host's actual client rect.
+///
+/// tao 0.35's `to_window_styles()` *always* adds `WS_CAPTION | WS_SYSMENU`
+/// for non-CHILD windows (see tao window_state.rs:244), and only clears
+/// WS_CAPTION inside the `WindowFlags::CHILD` branch — which our manually
+/// SetParent'd top-level never enters. Without this strip the A0 window
+/// shows a caption + Close button. The strip must happen BEFORE the Win32
+/// ShowWindow call (we use ShowWindow, not tao's set_visible, precisely so
+/// tao's apply_diff does not overwrite these edits).
+fn prepare_toplevel_for_show(hwnd_isize: isize, webview: &WebView) -> anyhow::Result<()> {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClientRect, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+        WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+    };
+    const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
 
     let hwnd = HWND(hwnd_isize as _);
+    println!("[a0-prep] stripping NC styles for top-level show");
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
+        let clear_mask =
+            WS_POPUP.0 | WS_CAPTION.0 | WS_THICKFRAME.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0;
+        // Keep WS_VISIBLE bit (we will ShowWindow next); clear only NC bits.
+        let new_style = (style & !clear_mask) | (style & WS_VISIBLE.0);
+        SetWindowLongPtrW(hwnd, GWLP_STYLE_IDX, new_style as isize);
+        println!("[a0-prep] GWL_STYLE 0x{:x} -> 0x{:x}", style, new_style);
+
+        // No SetParent for A0; just force a frame change so the NC area is
+        // recomputed against the new (frameless) style.
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        GetClientRect(hwnd, &mut rect)
+            .map_err(|e| anyhow::anyhow!("GetClientRect failed: {}", e))?;
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        .map_err(|e| anyhow::anyhow!("SetWindowPos failed: {}", e))?;
+    }
+
+    // Now read the post-frame-change client rect and size the WebView to it.
     let mut host_client = windows::Win32::Foundation::RECT::default();
     unsafe {
         GetClientRect(hwnd, &mut host_client)
@@ -838,7 +964,114 @@ fn set_webview_bounds_from_host(hwnd_isize: isize, webview: &WebView) -> anyhow:
         position: tao::dpi::PhysicalPosition::new(0.0, 0.0).into(),
         size: tao::dpi::PhysicalSize::new(cw as f64, ch as f64).into(),
     })?;
-    println!("[reparent] webview.set_bounds physical {}x{}", cw, ch);
+    println!("[a0-prep] webview.set_bounds physical {}x{}", cw, ch);
+    Ok(())
+}
+
+/// Show a window via Win32 `ShowWindow(SW_SHOWNOACTIVATE)`. Deliberately NOT
+/// `tao::Window::set_visible(true)`: tao's set_visible routes through
+/// `WindowState::apply_diff`, which on the false→true transition recomputes
+/// `GWL_STYLE` via `to_window_styles()` and `SetWindowLongW`s the result,
+/// clobbering the style edits `do_reparent` / `prepare_toplevel_for_show`
+/// just made. That regression re-added WS_CAPTION | WS_SYSMENU and cleared
+/// WS_CHILD, producing the visible NC chrome (caption + Close button + resize
+/// frame) reported by the user. ShowWindow touches only WS_VISIBLE, leaving
+/// every other style bit intact.
+fn show_window_noactivate(hwnd_isize: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+    let hwnd = HWND(hwnd_isize as _);
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
+    println!("[show] ShowWindow(SW_SHOWNOACTIVATE) hwnd=0x{:x}", hwnd_isize);
+}
+
+/// Fail-closed invariant check before showing the candidate. Returns Err with
+/// a human-readable reason if ANY check fails — the caller must NOT show the
+/// window and must drop the candidate + enter Backoff. Per Codex BLOCKED
+/// review: never show a window that still carries NC chrome or is mis-parented.
+///
+/// For A0 (top-level) we relax the WS_CHILD / true_parent checks (there is no
+/// desktop attach); we still require NC chrome to be stripped.
+fn show_invariant_check(
+    hwnd_isize: isize,
+    target: &DesktopTarget,
+    mode: Mode,
+) -> Result<(), String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClientRect, GetWindowLongPtrW, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_CHILD,
+        WS_EX_APPWINDOW, WS_POPUP, WS_THICKFRAME,
+    };
+    const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
+    const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
+
+    let hwnd = HWND(hwnd_isize as _);
+    let (style, ex) = unsafe {
+        (
+            GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32,
+            GetWindowLongPtrW(hwnd, GWLP_EXSTYLE_IDX) as u32,
+        )
+    };
+    let attaches = mode.attaches_to_desktop();
+
+    // Style: no NC chrome bits (caption/thickframe/sysmenu-popup).
+    if style & (WS_CAPTION.0 | WS_THICKFRAME.0 | WS_POPUP.0) != 0 {
+        return Err(format!(
+            "GWL_STYLE has NC bits: style=0x{:x} (CAPTION={} THICKFRAME={} POPUP={})",
+            style,
+            style & WS_CAPTION.0 != 0,
+            style & WS_THICKFRAME.0 != 0,
+            style & WS_POPUP.0 != 0
+        ));
+    }
+    // Attach modes must be WS_CHILD; A0 must NOT be (it is a top-level window).
+    if attaches && style & WS_CHILD.0 == 0 {
+        return Err(format!("attach mode requires WS_CHILD; style=0x{:x}", style));
+    }
+    // No WS_EX_APPWINDOW (would put us on the taskbar).
+    if ex & WS_EX_APPWINDOW.0 != 0 {
+        return Err(format!("GWL_EXSTYLE has WS_EX_APPWINDOW; ex=0x{:x}", ex));
+    }
+    // Attach modes: must be reparented onto the desktop target.
+    if attaches {
+        let actual_parent = desktop::true_parent(hwnd);
+        if actual_parent != target.parent {
+            return Err(format!(
+                "true_parent mismatch: expected 0x{:x} got 0x{:x}",
+                target.parent.0 as usize,
+                actual_parent.0 as usize
+            ));
+        }
+    }
+    // Host client rect must be positive.
+    let mut host_client = windows::Win32::Foundation::RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut host_client) }.is_err() {
+        return Err("GetClientRect(host) failed".to_string());
+    }
+    let cw = host_client.right - host_client.left;
+    let ch = host_client.bottom - host_client.top;
+    if cw <= 0 || ch <= 0 {
+        return Err(format!("host client rect non-positive: {}x{}", cw, ch));
+    }
+    // Attach modes: ClientToScreen(0,0) should align with the parent's client
+    // origin (both should be the screen origin of the WorkerW client area).
+    if attaches {
+        use windows::Win32::Graphics::Gdi::ClientToScreen;
+        let mut host_origin = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+        let mut parent_origin = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+        unsafe {
+            let _ = ClientToScreen(hwnd, &mut host_origin);
+            let _ = ClientToScreen(target.parent, &mut parent_origin);
+        }
+        if host_origin.x != parent_origin.x || host_origin.y != parent_origin.y {
+            return Err(format!(
+                "ClientToScreen(0,0) misaligned: host=({}, {}) parent=({}, {})",
+                host_origin.x, host_origin.y, parent_origin.x, parent_origin.y
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1165,5 +1398,178 @@ fn log_full_geometry(hwnd_isize: isize, label: &str) {
             "OTHER"
         };
         println!("  DPI awareness = {}", aware);
+    }
+}
+
+// ─── Diagnostic snapshot (Codex BLOCKED review) ────────────────────────────
+//
+// One unified log line per checkpoint carrying the full correlation tuple
+// (pid, generation, token, lifecycle, window_id, hwnd, mode) plus all the
+// style/geometry facts needed to attribute a NC-chrome regression to a
+// specific lifecycle stage. Used at the 5 checkpoints Codex requested.
+
+mod diag {
+    use super::{Ctx, HostState};
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetClientRect, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId,
+        IsWindowVisible, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_CHILD, WS_POPUP, WS_SYSMENU,
+        WS_THICKFRAME,
+    };
+
+    const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
+    const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
+
+    /// Snapshot every style/geometry fact about `hwnd` plus the correlation
+    /// tuple. Mirrors Codex's "5 checkpoint" diagnostic requirement so the
+    /// pre-show vs post-show state can be diffed in the log.
+    pub fn snapshot(label: &str, state: &HostState, ctx: &Ctx, hwnd_isize: isize, generation: u64, token: u64) {
+        let hwnd = HWND(hwnd_isize as _);
+        let pid = std::process::id();
+        let mode = ctx.args.mode;
+        let lifecycle = lifecycle_str(&state.lifecycle);
+        let window_id = state
+            .runtime
+            .as_ref()
+            .map(|r| format!("{:?}", r.window_id))
+            .unwrap_or_else(|| "none".to_string());
+
+        println!("──── diag: {} ────", label);
+        println!(
+            "  corr: pid={} generation={} token={} lifecycle={} window_id={} hwnd=0x{:x} mode={:?}",
+            pid, generation, token, lifecycle, window_id, hwnd_isize, mode
+        );
+
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
+            let ex = GetWindowLongPtrW(hwnd, GWLP_EXSTYLE_IDX) as u32;
+            println!(
+                "  GWL_STYLE=0x{:x} (CAPTION={} THICKFRAME={} POPUP={} CHILD={} SYSMENU={})",
+                style,
+                style & WS_CAPTION.0 != 0,
+                style & WS_THICKFRAME.0 != 0,
+                style & WS_POPUP.0 != 0,
+                style & WS_CHILD.0 != 0,
+                style & WS_SYSMENU.0 != 0,
+            );
+            println!("  GWL_EXSTYLE=0x{:x}", ex);
+            println!("  IsWindowVisible={}", IsWindowVisible(hwnd).as_bool());
+
+            let parent = crate::desktop::true_parent(hwnd);
+            let mut cls = [0u16; 64];
+            GetClassNameW(parent, &mut cls);
+            let cls_str = String::from_utf16_lossy(&cls);
+            let parent_pid = {
+                let mut p = 0u32;
+                GetWindowThreadProcessId(parent, Some(&mut p));
+                p
+            };
+            println!(
+                "  true_parent=0x{:x} class={} pid={}",
+                parent.0 as usize, cls_str, parent_pid
+            );
+            if let Some(rt) = state.runtime.as_ref() {
+                println!(
+                    "  expected_parent=0x{:x} (match={})",
+                    rt.target.parent.0 as usize,
+                    rt.target.parent == parent
+                );
+            }
+
+            let mut wr = RECT::default();
+            if GetWindowRect(hwnd, &mut wr).is_ok() {
+                println!(
+                    "  GetWindowRect={},{} {}x{}",
+                    wr.left,
+                    wr.top,
+                    wr.right - wr.left,
+                    wr.bottom - wr.top
+                );
+            }
+            let mut cr = RECT::default();
+            if GetClientRect(hwnd, &mut cr).is_ok() {
+                println!("  GetClientRect={}x{}", cr.right - cr.left, cr.bottom - cr.top);
+            }
+            let mut origin = POINT { x: 0, y: 0 };
+            if ClientToScreen(hwnd, &mut origin).as_bool() {
+                println!("  ClientToScreen(0,0)={},{}", origin.x, origin.y);
+            }
+            let mut ext = RECT::default();
+            let _ = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut ext as *mut _ as *mut _,
+                std::mem::size_of::<RECT>() as u32,
+            );
+            println!(
+                "  DWM_EXT_BOUNDS={},{} {}x{}",
+                ext.left,
+                ext.top,
+                ext.right - ext.left,
+                ext.bottom - ext.top
+            );
+        }
+        println!("──── /diag ────");
+    }
+
+    fn lifecycle_str(l: &super::Lifecycle) -> &'static str {
+        match l {
+            super::Lifecycle::RecoverQueued { .. } => "RecoverQueued",
+            super::Lifecycle::WaitingForPage { .. } => "WaitingForPage",
+            super::Lifecycle::Running => "Running",
+            super::Lifecycle::Backoff { .. } => "Backoff",
+        }
+    }
+
+    /// Enumerate all top-level windows in the system whose class name or title
+    /// matches `WallpaperAI` / `Chrome_WidgetWin_*`, printing PID + HWND +
+    /// visibility. Used to confirm only one host process / one valid host HWND
+    /// exists after recovery (Codex: "排除多实例").
+    pub fn enumerate_wallpaper_windows() {
+        use windows::Win32::Foundation::LPARAM;
+        use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, IsWindowVisible};
+
+        println!("──── system window enum ────");
+        let mut hits: Vec<(isize, String, bool, u32)> = Vec::new();
+        unsafe extern "system" fn proc(
+            hwnd: HWND,
+            lparam: LPARAM,
+        ) -> windows::core::BOOL {
+            let hits = &mut *(lparam.0 as *mut Vec<(isize, String, bool, u32)>);
+            let mut cls = [0u16; 64];
+            GetClassNameW(hwnd, &mut cls);
+            let len = cls.iter().position(|&c| c == 0).unwrap_or(cls.len());
+            let cls_str = String::from_utf16_lossy(&cls[..len]);
+            // Match WallpaperAI host windows and the Chrome widget containers
+            // wry/WebView2 creates. Skip unrelated top-level windows.
+            if cls_str.contains("WallpaperAI") || cls_str.starts_with("Chrome_WidgetWin_") {
+                let vis = IsWindowVisible(hwnd).as_bool();
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                hits.push((hwnd.0 as isize, cls_str, vis, pid));
+            }
+            windows::core::BOOL(1)
+        }
+        unsafe {
+            let _ = EnumWindows(
+                Some(proc),
+                LPARAM(&mut hits as *mut _ as isize),
+            );
+        }
+        for (h, cls, vis, pid) in &hits {
+            println!(
+                "  hwnd=0x{:x} class={} visible={} pid={}",
+                h, cls, vis, pid
+            );
+        }
+        let my_pid = std::process::id();
+        let mine = hits.iter().filter(|(_, _, _, p)| *p == my_pid).count();
+        println!(
+            "  summary: total={} owned-by-me(pid={})={}",
+            hits.len(), my_pid, mine
+        );
+        println!("──── /system window enum ────");
     }
 }
