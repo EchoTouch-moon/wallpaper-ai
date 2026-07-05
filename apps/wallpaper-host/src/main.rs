@@ -681,13 +681,29 @@ fn on_page_load_finished(state: &mut HostState, ctx: &Ctx, token: u64, url: Stri
                 token,
             );
 
-            // Fail-closed invariant: NEVER show a window that still carries
-            // NC chrome or is not properly parented. If any check fails we
-            // tear the candidate down and back off instead of flashing a
-            // framed window onto the desktop (per Codex BLOCKED review).
-            if let Err(reason) = show_invariant_check(hwnd, &target, ctx.args.mode) {
+            // Fail-closed PRE-show invariant: NEVER show a window that still
+            // carries NC chrome, is mis-parented, or is already visible. The
+            // last check is critical — do_reparent / prepare_toplevel_for_show
+            // must NOT have OR'd WS_VISIBLE into GWL_STYLE; if they did, the
+            // candidate is already on screen and the fail-closed gate is
+            // defeated (per Codex review). Any failure -> cleanup + Backoff.
+            let window_ref = state.runtime.as_ref().map(|r| &r.window);
+            let window_ref = match window_ref {
+                Some(w) => w,
+                None => {
+                    eprintln!("[recovery] runtime vanished pre-show → cleanup + Backoff");
+                    if let Some(old) = state.runtime.take() {
+                        old.destroy();
+                    }
+                    state.enter_backoff(token, attempt);
+                    return;
+                }
+            };
+            if let Err(reason) =
+                show_invariant_check(hwnd, &target, ctx.args.mode, window_ref, InvariantPhase::PreShow)
+            {
                 eprintln!(
-                    "[recovery] show invariant FAILED: {} → cleanup + Backoff",
+                    "[recovery] PRE-show invariant FAILED: {} → cleanup + Backoff",
                     reason
                 );
                 if let Some(old) = state.runtime.take() {
@@ -719,6 +735,35 @@ fn on_page_load_finished(state: &mut HostState, ctx: &Ctx, token: u64, url: Stri
                 generation,
                 token,
             );
+
+            // POST-show invariant: ShowWindow must actually have made the
+            // window visible, and style/parent/client must still hold. If this
+            // fails we still cleanup + Backoff (the window may have flashed,
+            // but we never commit it as the active Running generation).
+            let window_ref = state.runtime.as_ref().map(|r| &r.window);
+            if let Some(w) = window_ref {
+                if let Err(reason) = show_invariant_check(
+                    hwnd,
+                    &target,
+                    ctx.args.mode,
+                    w,
+                    InvariantPhase::PostShow,
+                ) {
+                    eprintln!(
+                        "[recovery] POST-show invariant FAILED: {} → cleanup + Backoff (no Running commit)",
+                        reason
+                    );
+                    if let Some(old) = state.runtime.take() {
+                        old.destroy();
+                    }
+                    state.lifecycle = Lifecycle::Backoff {
+                        token,
+                        attempt: attempt + 1,
+                        retry_at: Instant::now() + backoff_delay(attempt + 1),
+                    };
+                    return;
+                }
+            }
 
             state.active_generation = generation;
             state.lifecycle = Lifecycle::Running;
@@ -912,21 +957,37 @@ fn prepare_toplevel_for_show(hwnd_isize: isize, webview: &WebView) -> anyhow::Re
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
         GetClientRect, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-        WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+        SWP_NOACTIVATE, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_LAYERED,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+        WS_THICKFRAME, WS_VISIBLE,
     };
     const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
+    const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
 
     let hwnd = HWND(hwnd_isize as _);
     println!("[a0-prep] stripping NC styles for top-level show");
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
         let clear_mask =
-            WS_POPUP.0 | WS_CAPTION.0 | WS_THICKFRAME.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0;
-        // Keep WS_VISIBLE bit (we will ShowWindow next); clear only NC bits.
-        let new_style = (style & !clear_mask) | (style & WS_VISIBLE.0);
+            WS_POPUP.0 | WS_CAPTION.0 | WS_THICKFRAME.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0
+            | WS_VISIBLE.0; // ensure hidden after style mutation
+        // Keep only the bits the candidate needs as a frameless top-level
+        // surface. Do NOT OR WS_VISIBLE — ShowWindow handles that after the
+        // pre-show invariant passes.
+        let new_style = style & !clear_mask;
         SetWindowLongPtrW(hwnd, GWLP_STYLE_IDX, new_style as isize);
         println!("[a0-prep] GWL_STYLE 0x{:x} -> 0x{:x}", style, new_style);
+
+        // EXSTYLE: strip WS_EX_APPWINDOW (taskbar) — tao adds it by default
+        // even with with_skip_taskbar(true). Apply the same no-activate +
+        // tool-window ex-style as do_reparent so A0 also passes the show
+        // invariant. Classic branch: NO LAYERED.
+        let ex = GetWindowLongPtrW(hwnd, GWLP_EXSTYLE_IDX) as u32;
+        let new_ex = (ex & !WS_EX_APPWINDOW.0 & !WS_EX_LAYERED.0)
+            | WS_EX_NOACTIVATE.0
+            | WS_EX_TOOLWINDOW.0;
+        SetWindowLongPtrW(hwnd, GWLP_EXSTYLE_IDX, new_ex as isize);
+        println!("[a0-prep] GWL_EXSTYLE 0x{:x} -> 0x{:x}", ex, new_ex);
 
         // No SetParent for A0; just force a frame change so the NC area is
         // recomputed against the new (frameless) style.
@@ -987,22 +1048,37 @@ fn show_window_noactivate(hwnd_isize: isize) {
     println!("[show] ShowWindow(SW_SHOWNOACTIVATE) hwnd=0x{:x}", hwnd_isize);
 }
 
-/// Fail-closed invariant check before showing the candidate. Returns Err with
-/// a human-readable reason if ANY check fails — the caller must NOT show the
-/// window and must drop the candidate + enter Backoff. Per Codex BLOCKED
-/// review: never show a window that still carries NC chrome or is mis-parented.
+/// Which side of the ShowWindow call we are checking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InvariantPhase {
+    /// Before ShowWindow: candidate must be hidden + correctly styled/parented.
+    PreShow,
+    /// After ShowWindow: candidate must now be visible + style/parent stable.
+    PostShow,
+}
+
+/// Fail-closed invariant check. Returns Err with a human-readable reason if
+/// ANY check fails — the caller must NOT proceed (pre-show: do not show;
+/// post-show: do not transition to Running). Per Codex review: never show a
+/// window that still carries NC chrome or is mis-parented, and never trust
+/// ShowWindow without re-checking after.
 ///
 /// For A0 (top-level) we relax the WS_CHILD / true_parent checks (there is no
 /// desktop attach); we still require NC chrome to be stripped.
+///
+/// `window` is passed so we can check `has_undecorated_shadow()` directly
+/// (tao tracks that as a separate flag from GWL_STYLE).
 fn show_invariant_check(
     hwnd_isize: isize,
     target: &DesktopTarget,
     mode: Mode,
+    window: &Window,
+    phase: InvariantPhase,
 ) -> Result<(), String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetWindowLongPtrW, WINDOW_LONG_PTR_INDEX, WS_CAPTION, WS_CHILD,
-        WS_EX_APPWINDOW, WS_POPUP, WS_THICKFRAME,
+        GetClientRect, GetWindowLongPtrW, IsWindowVisible, WINDOW_LONG_PTR_INDEX, WS_CAPTION,
+        WS_CHILD, WS_EX_APPWINDOW, WS_POPUP, WS_THICKFRAME,
     };
     const GWLP_STYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-16);
     const GWLP_EXSTYLE_IDX: WINDOW_LONG_PTR_INDEX = WINDOW_LONG_PTR_INDEX(-20);
@@ -1015,6 +1091,24 @@ fn show_invariant_check(
         )
     };
     let attaches = mode.attaches_to_desktop();
+
+    // Phase-specific visibility requirement.
+    let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+    match phase {
+        InvariantPhase::PreShow => {
+            if visible {
+                return Err(format!(
+                    "pre-show: window already visible (style mutation leaked WS_VISIBLE); style=0x{:x}",
+                    style
+                ));
+            }
+        }
+        InvariantPhase::PostShow => {
+            if !visible {
+                return Err("post-show: window not visible after ShowWindow".to_string());
+            }
+        }
+    }
 
     // Style: no NC chrome bits (caption/thickframe/sysmenu-popup).
     if style & (WS_CAPTION.0 | WS_THICKFRAME.0 | WS_POPUP.0) != 0 {
@@ -1033,6 +1127,10 @@ fn show_invariant_check(
     // No WS_EX_APPWINDOW (would put us on the taskbar).
     if ex & WS_EX_APPWINDOW.0 != 0 {
         return Err(format!("GWL_EXSTYLE has WS_EX_APPWINDOW; ex=0x{:x}", ex));
+    }
+    // tao's undecorated_shadow flag must be off (separate from GWL_STYLE).
+    if window.has_undecorated_shadow() {
+        return Err("has_undecorated_shadow() == true (expected false)".to_string());
     }
     // Attach modes: must be reparented onto the desktop target.
     if attaches {
@@ -1056,14 +1154,19 @@ fn show_invariant_check(
         return Err(format!("host client rect non-positive: {}x{}", cw, ch));
     }
     // Attach modes: ClientToScreen(0,0) should align with the parent's client
-    // origin (both should be the screen origin of the WorkerW client area).
+    // origin. CHECK the BOOL return — a failed ClientToScreen leaves the POINT
+    // at (0,0) and would falsely pass the alignment check.
     if attaches {
         use windows::Win32::Graphics::Gdi::ClientToScreen;
         let mut host_origin = windows::Win32::Foundation::POINT { x: 0, y: 0 };
         let mut parent_origin = windows::Win32::Foundation::POINT { x: 0, y: 0 };
         unsafe {
-            let _ = ClientToScreen(hwnd, &mut host_origin);
-            let _ = ClientToScreen(target.parent, &mut parent_origin);
+            if !ClientToScreen(hwnd, &mut host_origin).as_bool() {
+                return Err("ClientToScreen(host, 0,0) failed".to_string());
+            }
+            if !ClientToScreen(target.parent, &mut parent_origin).as_bool() {
+                return Err("ClientToScreen(parent, 0,0) failed".to_string());
+            }
         }
         if host_origin.x != parent_origin.x || host_origin.y != parent_origin.y {
             return Err(format!(
@@ -1106,16 +1209,22 @@ fn do_reparent(
         // GWL_STYLE: clear ALL non-client-area styles (caption/sysmenu/thickframe
         // + minimize/maximize boxes) — these are what produce the visible
         // "WallpaperAI" title bar + border ("shell") when reparented into WorkerW.
-        // Also clear WS_POPUP. Keep only WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN |
+        // Also clear WS_POPUP. Keep only WS_CHILD | WS_CLIPCHILDREN |
         // WS_CLIPSIBLINGS (the bare minimum for a child that paints content).
+        //
+        // Deliberately do NOT OR WS_VISIBLE here (per Codex review): the
+        // candidate must stay hidden until the pre-show invariant passes and
+        // ShowWindow(SW_SHOWNOACTIVATE) is called. Otherwise the style mutation
+        // itself makes the window visible, defeating the fail-closed gate.
         let style = GetWindowLongPtrW(hwnd, GWLP_STYLE_IDX) as u32;
         let clear_mask = WS_POPUP.0
             | WS_CAPTION.0
             | WS_THICKFRAME.0
             | WS_SYSMENU.0
             | WS_MINIMIZEBOX.0
-            | WS_MAXIMIZEBOX.0;
-        let keep_mask = WS_CHILD.0 | WS_VISIBLE.0 | WS_CLIPCHILDREN.0 | WS_CLIPSIBLINGS.0;
+            | WS_MAXIMIZEBOX.0
+            | WS_VISIBLE.0; // ensure hidden after style mutation
+        let keep_mask = WS_CHILD.0 | WS_CLIPCHILDREN.0 | WS_CLIPSIBLINGS.0;
         let new_style = (style & !clear_mask) | keep_mask;
         SetWindowLongPtrW(hwnd, GWLP_STYLE_IDX, new_style as isize);
         println!("[reparent] GWL_STYLE 0x{:x} -> 0x{:x}", style, new_style);
@@ -1525,8 +1634,14 @@ mod diag {
 
     /// Enumerate all top-level windows in the system whose class name or title
     /// matches `WallpaperAI` / `Chrome_WidgetWin_*`, printing PID + HWND +
-    /// visibility. Used to confirm only one host process / one valid host HWND
-    /// exists after recovery (Codex: "排除多实例").
+    /// visibility.
+    ///
+    /// NOTE (per Codex review): this CANNOT prove "no zombie wallpaper-host
+    /// process" — the active host window is reparented into WorkerW and so is
+    /// a *child*, not a top-level window, and will not appear in EnumWindows
+    /// output. It can only confirm "no matching leftover top-level window".
+    /// True process-singleton must be enforced in P3 via a named mutex / OS
+    /// singleton lock.
     pub fn enumerate_wallpaper_windows() {
         use windows::Win32::Foundation::LPARAM;
         use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, IsWindowVisible};
@@ -1567,7 +1682,7 @@ mod diag {
         let my_pid = std::process::id();
         let mine = hits.iter().filter(|(_, _, _, p)| *p == my_pid).count();
         println!(
-            "  summary: total={} owned-by-me(pid={})={}",
+            "  summary: total={} top-level matches owned-by-me(pid={})={} (NOTE: active host is a WorkerW child, not top-level; this only confirms no leftover top-level match, not process-singleton)",
             hits.len(), my_pid, mine
         );
         println!("──── /system window enum ────");
