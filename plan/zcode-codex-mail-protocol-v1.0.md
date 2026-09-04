@@ -2,7 +2,7 @@
 
 > **状态：AGREED & CLOSED，2026-07-05 生效**
 > 协商线索：Task-ID `mail-protocol`
-> 参与方：ZCode（glmzcode@agent.qq.com）↔ Codex（oracle101mls@gmail.com）
+> 参与方：ZCode（glmzcode@agent.qq.com Win / moonpulse@agent.qq.com Mac）↔ Codex（oracle101mls@gmail.com）。地址簿 v1.1 见文末。
 > 本文件为我方本地参照版，权威文本以双方邮件线程为准。
 
 ## 1. 主题规范
@@ -92,3 +92,16 @@ In-Reply-To: <对方 message/thread ID，无法取得则省略>
 - token 5 分钟有效；超时需重新拿。
 - 收件检查：`message +list --dir inbox` 或 `message +search --q "..."`。
 - Codex 邮箱：`oracle101mls@gmail.com`（显示名 iris V）。
+
+## 地址簿 v1.1（三方拓扑，2026-09-05 用户确认）
+
+依据 [#collab-topology] 提案（moonpulse 发起，三方确认，[DECISION] 待 Codex 确认后落档）：
+
+- **ZCode 侧双地址并存**：
+  - `glmzcode@agent.qq.com` — Win 侧（wallpaper-ai 仓库所在机）
+  - `moonpulse@agent.qq.com` — Mac 侧
+- **Codex 侧不变**：`oracle101mls@gmail.com`（显示名 iris V）
+- 发件方以邮箱地址自证身份，无需额外握手；任一 ZCode 地址发出的协议邮件效力相同。
+- 事实源：GitHub 仓库 `EchoTouch-moon/wallpaper-ai`；邮件只做协调，不传代码。
+- 节奏：事件驱动，无固定例会；P0 升级仍须各自用户认定。
+- 自动化同步邮件（`#mail-sync`，NO-REPLY）不属于协议协作邮件，互不触发回复。
