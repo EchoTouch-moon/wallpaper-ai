@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
 import { getTemplate, type TemplateSlot } from "@wallpaper/core/layout";
 import { wallpaperHost } from "./wallpaper-host";
+import { subscribeSwaps, type SwapMsg } from "./swap-bus";
 
 /**
  * P1 wallpaper stage: renders the canonical `triptych_desktop_equal` template
  * geometry from @wallpaper/core, with placeholder gradient fills per slot.
  *
- * No real image assets in P1 — the point is to prove:
- *   1. the wallpaper renderer boots inside Electron,
- *   2. it consumes @wallpaper/core's real template geometry,
- *   3. on Windows it sits behind desktop icons (WorkerW), on Mac (mock) it
- *      shows as a normal window so the layout can be verified.
+ * P2.2: when served by wallpaper-host with `--assets`, the stage loads
+ * `/manifest.json` (asset pool + slot assignment maintained by the host's
+ * control server) and shows real images per slot. Swaps arrive through
+ * `window.__wallpaper.applySwap` (see swap-bus.ts) and update exactly one
+ * slot's <img>, so only that region repaints — no full-stage re-render.
+ * Without a manifest (Electron dev, Octos, A0 without assets) the gradients
+ * remain, keeping all diagnostic modes usable.
  *
- * Real image rendering (Fabric) and per-slot swap land in P2.
+ * Real Fabric-based rendering (crop math from @wallpaper/core) lands in a
+ * later P2 slice; CSS object-fit:center-crop matches the template's aspect
+ * handling for now.
  */
 
 const TEMPLATE_ID = "triptych_desktop_equal";
@@ -28,6 +33,12 @@ interface PlatformInfo {
   name: string;
   embedded: boolean;
   displayCount: number;
+}
+
+/** Shape of wallpaper-host's /manifest.json (an empty one is served too). */
+interface Manifest {
+  assets: { id: string; url: string }[];
+  assignment: Record<string, string>;
 }
 
 function usePlatformInfo(): PlatformInfo | null {
@@ -56,7 +67,64 @@ function usePlatformInfo(): PlatformInfo | null {
   return info;
 }
 
-function Slot({ slot }: { slot: TemplateSlot }) {
+/**
+ * Manifest + swap subscription. urlBySlot maps the template's slot ids to the
+ * currently assigned image URL; applySwap updates only the touched slots so
+ * React re-renders just those <img> elements.
+ */
+function useManifest(): { urlBySlot: Record<string, string>; assetCount: number } {
+  const [state, setState] = useState<{ urlBySlot: Record<string, string>; assetCount: number }>({
+    urlBySlot: {},
+    assetCount: 0,
+  });
+
+  // Initial load: one fetch against the wallpaper:// origin. On hosts without
+  // the custom protocol this 404s/throws and we stay on gradients.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("./manifest.json", { cache: "no-store" });
+        if (!res.ok) return;
+        const manifest: Manifest = await res.json();
+        if (cancelled) return;
+        setState({
+          urlBySlot: Object.fromEntries(
+            Object.entries(manifest.assignment ?? {}).map(([slot, assetId]) => [
+              slot,
+              (manifest.assets ?? []).find((a) => a.id === assetId)?.url ?? "",
+            ]),
+          ),
+          assetCount: (manifest.assets ?? []).length,
+        });
+      } catch {
+        // Not a wallpaper-host page — fine, gradients stay.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Live swaps from the host (single-slot or batched).
+  useEffect(
+    () =>
+      subscribeSwaps((swaps: SwapMsg[]) => {
+        setState((prev) => {
+          const urlBySlot = { ...prev.urlBySlot };
+          for (const swap of swaps) {
+            urlBySlot[swap.slot] = swap.url;
+          }
+          return { ...prev, urlBySlot };
+        });
+      }),
+    [],
+  );
+
+  return state;
+}
+
+function Slot({ slot, assetUrl }: { slot: TemplateSlot; assetUrl?: string }) {
   // Template geometry is normalized 0..1 of the canvas. The stage fills the
   // window, so we map directly to percentages.
   const style: React.CSSProperties = {
@@ -69,22 +137,44 @@ function Slot({ slot }: { slot: TemplateSlot }) {
     borderRadius: slot.shape === "rounded-rect" ? "12px" : "0",
     boxSizing: "border-box",
     transform: slot.rotation ? `rotate(${slot.rotation}deg)` : undefined,
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "flex-start",
-    padding: "24px",
     overflow: "hidden",
-    color: "rgba(255,255,255,0.85)",
-    fontFamily: "system-ui, sans-serif",
-    fontSize: "18px",
-    fontWeight: 600,
-    textShadow: "0 1px 4px rgba(0,0,0,0.4)",
   };
   return (
     <div style={style} data-slot-id={slot.id} data-role={slot.role}>
-      <span>
-        {slot.id} · {slot.role}
-      </span>
+      {assetUrl ? (
+        <img
+          src={assetUrl}
+          alt=""
+          draggable={false}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            userSelect: "none",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "flex-end",
+            padding: "24px",
+            color: "rgba(255,255,255,0.85)",
+            fontFamily: "system-ui, sans-serif",
+            fontSize: "18px",
+            fontWeight: 600,
+            textShadow: "0 1px 4px rgba(0,0,0,0.4)",
+          }}
+        >
+          <span>
+            {slot.id} · {slot.role}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -92,6 +182,7 @@ function Slot({ slot }: { slot: TemplateSlot }) {
 export function WallpaperStage() {
   const template = getTemplate(TEMPLATE_ID);
   const info = usePlatformInfo();
+  const { urlBySlot, assetCount } = useManifest();
 
   return (
     <div
@@ -103,7 +194,7 @@ export function WallpaperStage() {
       }}
     >
       {template.slots.map((slot) => (
-        <Slot key={slot.id} slot={slot} />
+        <Slot key={slot.id} slot={slot} assetUrl={urlBySlot[slot.id]} />
       ))}
 
       {/* Diagnostics badge — helps confirm the layer/platform on first run.
@@ -128,6 +219,7 @@ export function WallpaperStage() {
         <div>embedded: {info ? String(info.embedded) : "…"}</div>
         <div>displays: {info?.displayCount ?? "…"}</div>
         <div>template: {TEMPLATE_ID}</div>
+        <div>assets: {assetCount}</div>
       </div>
     </div>
   );

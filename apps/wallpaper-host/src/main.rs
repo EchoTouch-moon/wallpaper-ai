@@ -45,9 +45,13 @@
 //! - Window events are filtered by `WindowId` so a stale destroyed window
 //!   cannot trip the active generation.
 
+mod assets;
+mod control;
 mod desktop;
 mod renderer;
 
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
@@ -115,6 +119,17 @@ struct Args {
     /// failed and backing off (seconds).
     #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u64).range(3..))]
     page_timeout_secs: u64,
+
+    /// P2.2: directory of image assets for region-level swap. When omitted
+    /// the renderer serves an empty manifest and stays on gradient
+    /// placeholders (A0/A1 diagnostics keep working unchanged).
+    #[arg(long)]
+    assets: Option<String>,
+
+    /// P2.2: port of the loopback-only control server (127.0.0.1). 0 disables
+    /// it entirely.
+    #[arg(long, default_value_t = 26078)]
+    control_port: u16,
 }
 
 // ─── Recovery state machine ────────────────────────────────────────────────
@@ -132,6 +147,10 @@ enum HostEvent {
     /// `PageLoadEvent::Finished` fired for a candidate. The page-load closure
     /// only forwards this; the actual attach happens in the handler.
     PageLoadFinished { token: u64, url: String },
+    /// The control server already applied a swap to the asset pool; notify
+    /// the live renderer. Only delivered to the webview while `Running` —
+    /// otherwise the change rides the next generation's `/manifest.json`.
+    SwapApplied { swaps: Vec<(String, String)> },
 }
 
 /// Why a recovery was requested. Diagnostic only — drives the log line.
@@ -331,6 +350,25 @@ fn main() -> anyhow::Result<()> {
     let event_loop: EventLoop<HostEvent> = EventLoopBuilder::<HostEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
+    // P2.2: asset pool + loopback control server. The pool is shared by the
+    // protocol handler (manifest/assets) and the control thread (rotate);
+    // renderer notification rides HostEvent::SwapApplied.
+    let pool = match &args.assets {
+        Some(dir) => {
+            let pool = Arc::new(Mutex::new(assets::AssetPool::scan(Path::new(dir))?));
+            if args.control_port != 0 {
+                control::spawn(args.control_port, proxy.clone(), pool.clone())?;
+            } else {
+                println!("[control] disabled (--control-port 0)");
+            }
+            Some(pool)
+        }
+        None => {
+            println!("[control] no --assets dir; swap control plane offline");
+            None
+        }
+    };
+
     let now = Instant::now();
     let guardian_interval = Duration::from_millis(args.guardian_interval_ms);
     let page_timeout = Duration::from_secs(args.page_timeout_secs);
@@ -359,6 +397,7 @@ fn main() -> anyhow::Result<()> {
         root,
         guardian_interval,
         page_timeout,
+        pool,
     };
 
     run_event_loop(event_loop, state, ctx);
@@ -373,6 +412,9 @@ struct Ctx {
     root: RendererRoot,
     guardian_interval: Duration,
     page_timeout: Duration,
+    /// Shared with the protocol handler + control thread; `None` when
+    /// `--assets` was not given (swap feature offline).
+    pool: Option<Arc<Mutex<assets::AssetPool>>>,
 }
 
 /// Run the event loop with the recovery state machine.
@@ -389,6 +431,9 @@ fn run_event_loop(event_loop: EventLoop<HostEvent>, mut state: HostState, ctx: C
             }
             Event::UserEvent(HostEvent::PageLoadFinished { token, url }) => {
                 on_page_load_finished(&mut state, &ctx, token, url);
+            }
+            Event::UserEvent(HostEvent::SwapApplied { swaps }) => {
+                on_swap_applied(&mut state, &ctx, swaps);
             }
             Event::WindowEvent {
                 window_id, event, ..
@@ -589,7 +634,10 @@ fn build_candidate(
     let proxy = state.proxy.clone();
     let webview = WebViewBuilder::new()
         .with_url(ENTRY_URL)
-        .with_custom_protocol(renderer::SCHEME.to_string(), make_handler(ctx.root.clone()))
+        .with_custom_protocol(
+            renderer::SCHEME.to_string(),
+            make_handler(ctx.root.clone(), ctx.pool.clone()),
+        )
         .with_on_page_load_handler(move |event, url| {
             if matches!(event, PageLoadEvent::Finished) {
                 if let Err(e) = proxy.send_event(HostEvent::PageLoadFinished {
@@ -644,6 +692,40 @@ fn build_candidate(
         candidate_generation,
         token,
     );
+}
+
+/// Push already-applied pool swaps into the live renderer. Only delivered
+/// while `Running`: during build/waiting the candidate webview is not the
+/// active surface, and any rebuilt generation reads the current assignment
+/// from `/manifest.json` at load anyway. Slot ids / URLs originate from the
+/// pool's allowlisted names ([A-Za-z0-9._-]), so embedding them in the
+/// script needs no escaping.
+fn on_swap_applied(state: &mut HostState, ctx: &Ctx, swaps: Vec<(String, String)>) {
+    let _ = ctx; // uniform handler signature; pool already mutated by control thread
+    if !matches!(state.lifecycle, Lifecycle::Running) {
+        eprintln!(
+            "[swap] {} swap(s) applied to pool while not Running; renderer picks them up on next load",
+            swaps.len()
+        );
+        return;
+    }
+    let Some(runtime) = state.runtime.as_ref() else {
+        return;
+    };
+    let items = swaps
+        .iter()
+        .map(|(slot, url)| format!("{{slot:'{}',url:'{}'}}", slot, url))
+        .collect::<Vec<_>>()
+        .join(",");
+    let script = format!(
+        "window.__wallpaper && window.__wallpaper.applySwap([{}]);",
+        items
+    );
+    if let Err(e) = runtime.webview.evaluate_script(&script) {
+        eprintln!("[swap] evaluate_script failed: {}", e);
+    } else {
+        println!("[swap] pushed {} swap(s) to renderer gen={}", swaps.len(), runtime.generation);
+    }
 }
 
 /// `PageLoadEvent::Finished` arrived for a candidate. Validate token + URL,

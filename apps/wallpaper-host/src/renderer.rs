@@ -2,13 +2,20 @@
 //! protocol (`wallpaper://`). Files are read from the renderer dist root
 //! passed on the CLI; `..` traversal is rejected and only paths inside the
 //! root are served.
+//!
+//! P2.2: additionally serves `/manifest.json` (asset pool + slot assignment,
+//! serialized from the shared AssetPool on every request so a rebuilt
+//! generation always boots with the current assignment) and `/assets/<file>`
+//! (only names currently known to the pool are ever read from disk).
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Context, Result};
 use wry::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
+
+use crate::assets::AssetPool;
 
 /// Canonical scheme name used to load the renderer.
 pub const SCHEME: &str = "wallpaper";
@@ -49,8 +56,9 @@ impl RendererRoot {
 /// any path that canonicalizes outside the renderer root.
 pub fn make_handler(
     root: RendererRoot,
+    pool: Option<Arc<Mutex<AssetPool>>>,
 ) -> impl Fn(wry::WebViewId, Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
-    move |_id, request| match build_response(&root, &request) {
+    move |_id, request| match build_response(&root, pool.as_ref(), &request) {
         Ok((bytes, mime)) => Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, mime.as_str())
@@ -63,8 +71,53 @@ pub fn make_handler(
     }
 }
 
-fn build_response(root: &RendererRoot, request: &Request<Vec<u8>>) -> Result<(Vec<u8>, String)> {
+fn build_response(
+    root: &RendererRoot,
+    pool: Option<&Arc<Mutex<AssetPool>>>,
+    request: &Request<Vec<u8>>,
+) -> Result<(Vec<u8>, String)> {
     let path = request.uri().path();
+
+    // P2.2: manifest = current pool state, regenerated per request.
+    if path == "/manifest.json" {
+        let body = match pool {
+            Some(p) => p
+                .lock()
+                .map(|p| p.manifest_json())
+                .map_err(|_| anyhow!("asset pool poisoned"))?,
+            // No --assets configured: empty manifest, renderer stays on its
+            // gradient placeholders.
+            None => "{\"assets\":[],\"assignment\":{}}".to_string(),
+        };
+        return Ok((body.into_bytes(), "application/json".to_string()));
+    }
+
+    // P2.2: image files, gated by the pool's scanned name list. NOTE: the
+    // Vite renderer bundle's own hashed chunks also live under /assets/ —
+    // names not in the pool fall through to the static root instead of
+    // erroring (regression seen live: index-*.js/css 500'd, blank wallpaper).
+    if let Some(name) = path.strip_prefix("/assets/") {
+        if let Some(pool) = pool {
+            if let Ok(p) = pool.lock() {
+                if p.knows_file(name) {
+                    let candidate = p.file_path(name);
+                    let bytes = std::fs::read(&candidate)
+                        .with_context(|| format!("read {:?}", candidate))?;
+                    let mime = mime_guess::from_path(name)
+                        .first_or_octet_stream()
+                        .essence_str()
+                        .to_string();
+                    return Ok((bytes, mime));
+                }
+            }
+        }
+        return serve_static(root, path);
+    }
+
+    serve_static(root, path)
+}
+
+fn serve_static(root: &RendererRoot, path: &str) -> Result<(Vec<u8>, String)> {
     let rel = if path == "/" {
         "index.html"
     } else {
