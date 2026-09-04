@@ -19,3 +19,9 @@ __pycache__/
 
 # Claude Code local settings (local permissions/tokens)
 .claude/settings.local.json
+
+# Local tool state
+.freebuff/
+
+# Raw mail API dumps (cleaned records are committed, raw fetch artifacts are not)
+plan/_*_raw.json
