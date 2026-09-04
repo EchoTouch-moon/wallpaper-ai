@@ -130,6 +130,12 @@ struct Args {
     /// it entirely.
     #[arg(long, default_value_t = 26078)]
     control_port: u16,
+
+    /// P2.4: per-slot timed rotation, repeatable as `--rotate SLOT=SECONDS`
+    /// (e.g. `--rotate center=600 --rotate left=1800`). Requires `--assets`.
+    /// Minimum interval 5s. Rotation fires only while the host is Running.
+    #[arg(long = "rotate", value_name = "SLOT=SECONDS")]
+    rotate: Vec<String>,
 }
 
 // ─── Recovery state machine ────────────────────────────────────────────────
@@ -261,6 +267,9 @@ struct HostState {
     /// window enum the first time the status timer fires after entering
     /// Running. Reset to true each time we transition into Running.
     running_diag_pending: bool,
+    /// P2.4: per-slot timed rotation rules (empty unless --rotate given and
+    /// the pool exists). Ticks fire only while Running.
+    rotations: Vec<RotateRule>,
 }
 
 impl HostState {
@@ -291,6 +300,42 @@ impl HostState {
             retry_at: Instant::now() + delay,
         };
     }
+}
+
+/// P2.4: one per-slot timed rotation rule from `--rotate SLOT=SECONDS`.
+struct RotateRule {
+    slot: String,
+    interval: Duration,
+    /// Absolute next-fire time. Primed at startup; fires only while Running,
+    /// so a due tick during recovery/rebuild fires once Running resumes.
+    next_at: Instant,
+}
+
+/// Minimum rotation interval (guards against busy-looping the pool/webview).
+const MIN_ROTATE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Parse `SLOT=SECONDS` specs into rules. Slot ids are validated against the
+/// template slots when the pool is created; parsing here only checks shape.
+fn parse_rotate_specs(specs: &[String]) -> anyhow::Result<Vec<(String, Duration)>> {
+    specs
+        .iter()
+        .map(|spec| {
+            let (slot, secs) = spec
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("--rotate expects SLOT=SECONDS, got {:?}", spec))?;
+            let secs: u64 = secs
+                .parse()
+                .map_err(|_| anyhow::anyhow!("--rotate seconds must be an integer, got {:?}", secs))?;
+            if secs < MIN_ROTATE_INTERVAL.as_secs() {
+                return Err(anyhow::anyhow!(
+                    "--rotate interval for {:?} must be >= {}s",
+                    slot,
+                    MIN_ROTATE_INTERVAL.as_secs()
+                ));
+            }
+            Ok((slot.to_string(), Duration::from_secs(secs)))
+        })
+        .collect()
 }
 
 /// Exponential backoff with a cap. attempt=1 → 500ms, 2 → 1s, 3 → 2s,
@@ -374,6 +419,29 @@ fn main() -> anyhow::Result<()> {
     let page_timeout = Duration::from_secs(args.page_timeout_secs);
     let first_token = 1;
 
+    // P2.4: parse --rotate specs up-front so a typo fails fast at startup.
+    let rotate_specs = parse_rotate_specs(&args.rotate)?;
+    for (slot, _) in &rotate_specs {
+        if !assets::TEMPLATE_SLOTS.contains(&slot.as_str()) {
+            return Err(anyhow::anyhow!(
+                "--rotate slot {:?} is not one of {:?}",
+                slot,
+                assets::TEMPLATE_SLOTS
+            ));
+        }
+    }
+    if !rotate_specs.is_empty() && pool.is_none() {
+        return Err(anyhow::anyhow!("--rotate requires --assets"));
+    }
+    let rotations: Vec<RotateRule> = rotate_specs
+        .into_iter()
+        .map(|(slot, interval)| RotateRule {
+            slot,
+            interval,
+            next_at: now + interval,
+        })
+        .collect();
+
     let state = HostState {
         runtime: None,
         // First generation: queue an immediate build. attempt=0 so the first
@@ -390,6 +458,7 @@ fn main() -> anyhow::Result<()> {
         active_generation: 0,
         next_token: first_token + 1,
         running_diag_pending: false,
+        rotations,
     };
 
     let ctx = Ctx {
@@ -528,8 +597,88 @@ fn schedule(
                     log_window_state(rt.window.hwnd() as isize, "alive");
                 }
             }
+            run_due_rotations(state, ctx, now);
         }
         _ => {}
+    }
+}
+
+/// P2.4: fire every due `--rotate` rule, exactly once per interval, pushing
+/// the change to the live renderer. Only while `Running` — during recovery /
+/// rebuild there is no active webview; a tick missed then fires once Running
+/// resumes (next_at stays in the past until served). Rotation mutates the
+/// shared pool and reuses the SwapApplied push path.
+fn run_due_rotations(state: &mut HostState, ctx: &Ctx, now: Instant) {
+    if state.rotations.is_empty() || !matches!(state.lifecycle, Lifecycle::Running) {
+        return;
+    }
+    let Some(pool) = ctx.pool.as_ref() else {
+        return;
+    };
+
+    // Phase 1 (mutable): pick due rules and advance their schedules.
+    let mut due: Vec<(String, Duration)> = Vec::new();
+    for rule in state.rotations.iter_mut() {
+        if now >= rule.next_at {
+            while rule.next_at <= now {
+                rule.next_at += rule.interval;
+            }
+            due.push((rule.slot.clone(), rule.interval));
+        }
+    }
+    if due.is_empty() {
+        return;
+    }
+
+    // Phase 2: rotate the pool and push to the live renderer.
+    for (slot, interval) in due {
+        match pool.lock().map(|mut p| p.rotate(Some(&slot))) {
+            Ok(swaps) if swaps.is_empty() => {
+                eprintln!(
+                    "[rotate] slot={} due but pool not rotatable (need >= 2 assets); interval {:?}",
+                    slot, interval
+                );
+            }
+            Ok(swaps) => {
+                println!(
+                    "[rotate] slot={} interval={:?} → {}",
+                    slot,
+                    interval,
+                    swaps
+                        .iter()
+                        .map(|(_, url)| url.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                if let Some(runtime) = state.runtime.as_ref() {
+                    push_swaps_to_renderer(runtime, &swaps);
+                }
+            }
+            Err(_) => {
+                eprintln!("[rotate] asset pool poisoned; skipping tick");
+            }
+        }
+    }
+}
+
+/// Shared renderer push used by both the control server (SwapApplied) and the
+/// rotation ticks. Slot ids / URLs come from the pool's allowlisted names, so
+/// embedding them in the script needs no escaping.
+fn push_swaps_to_renderer(runtime: &HostRuntime, swaps: &[(String, String)]) {
+    let items = swaps
+        .iter()
+        .map(|(slot, url)| format!("{{slot:'{}',url:'{}'}}", slot, url))
+        .collect::<Vec<_>>()
+        .join(",");
+    let script =
+        format!("window.__wallpaper && window.__wallpaper.applySwap([{}]);", items);
+    match runtime.webview.evaluate_script(&script) {
+        Ok(()) => println!(
+            "[swap] pushed {} swap(s) to renderer gen={}",
+            swaps.len(),
+            runtime.generation
+        ),
+        Err(e) => eprintln!("[swap] evaluate_script failed: {}", e),
     }
 }
 
@@ -697,9 +846,7 @@ fn build_candidate(
 /// Push already-applied pool swaps into the live renderer. Only delivered
 /// while `Running`: during build/waiting the candidate webview is not the
 /// active surface, and any rebuilt generation reads the current assignment
-/// from `/manifest.json` at load anyway. Slot ids / URLs originate from the
-/// pool's allowlisted names ([A-Za-z0-9._-]), so embedding them in the
-/// script needs no escaping.
+/// from `/manifest.json` at load anyway.
 fn on_swap_applied(state: &mut HostState, ctx: &Ctx, swaps: Vec<(String, String)>) {
     let _ = ctx; // uniform handler signature; pool already mutated by control thread
     if !matches!(state.lifecycle, Lifecycle::Running) {
@@ -709,22 +856,8 @@ fn on_swap_applied(state: &mut HostState, ctx: &Ctx, swaps: Vec<(String, String)
         );
         return;
     }
-    let Some(runtime) = state.runtime.as_ref() else {
-        return;
-    };
-    let items = swaps
-        .iter()
-        .map(|(slot, url)| format!("{{slot:'{}',url:'{}'}}", slot, url))
-        .collect::<Vec<_>>()
-        .join(",");
-    let script = format!(
-        "window.__wallpaper && window.__wallpaper.applySwap([{}]);",
-        items
-    );
-    if let Err(e) = runtime.webview.evaluate_script(&script) {
-        eprintln!("[swap] evaluate_script failed: {}", e);
-    } else {
-        println!("[swap] pushed {} swap(s) to renderer gen={}", swaps.len(), runtime.generation);
+    if let Some(runtime) = state.runtime.as_ref() {
+        push_swaps_to_renderer(runtime, &swaps);
     }
 }
 
@@ -1055,6 +1188,10 @@ fn next_deadline(state: &HostState, now: Instant) -> Instant {
         Lifecycle::Running => {
             candidates.push(state.next_guardian_at);
             candidates.push(state.next_status_at);
+            // P2.4: wake for due rotation ticks.
+            if let Some(next) = state.rotations.iter().map(|r| r.next_at).min() {
+                candidates.push(next);
+            }
         }
     }
     candidates

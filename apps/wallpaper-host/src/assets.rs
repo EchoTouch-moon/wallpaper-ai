@@ -230,7 +230,7 @@ impl AssetPool {
             .map(|(_, idx)| *idx)
             .collect();
         let start = *self.cursors.get(slot).unwrap_or(&0);
-        let mut scan = |skip: &[usize]| {
+        let scan = |skip: &[usize]| {
             let mut idx = start;
             for _ in 0..self.assets.len() {
                 idx = (idx + 1) % self.assets.len();
