@@ -39,11 +39,16 @@ pub fn spawn(
     println!("[control] listening on http://127.0.0.1:{} (loopback only)", local_port);
     std::thread::Builder::new()
         .name("control-http".into())
-        .spawn(move || serve(listener, proxy, pool))?;
+        .spawn(move || serve(listener, local_port, proxy, pool))?;
     Ok(())
 }
 
-fn serve(listener: TcpListener, proxy: EventLoopProxy<HostEvent>, pool: Arc<Mutex<AssetPool>>) {
+fn serve(
+    listener: TcpListener,
+    port: u16,
+    proxy: EventLoopProxy<HostEvent>,
+    pool: Arc<Mutex<AssetPool>>,
+) {
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let proxy = proxy.clone();
@@ -51,12 +56,50 @@ fn serve(listener: TcpListener, proxy: EventLoopProxy<HostEvent>, pool: Arc<Mute
         // Thread-per-conn is fine at human interaction rates and keeps the
         // accept loop immune to a slow client.
         let _ = std::thread::Builder::new().name("control-conn".into()).spawn(move || {
-            handle_conn(stream, proxy, pool);
+            handle_conn(stream, port, proxy, pool);
         });
     }
 }
 
-fn handle_conn(stream: TcpStream, proxy: EventLoopProxy<HostEvent>, pool: Arc<Mutex<AssetPool>>) {
+/// P2.2-hardening (moonpulse review): every request must carry the custom
+/// `X-Wallpaper-Control` header — browsers refuse to attach custom headers
+/// cross-origin without a successful CORS preflight, which we never answer,
+/// so a drive-by web page cannot mutate the wallpaper (or read /health) via
+/// no-cors fetch / form POST. The Host check additionally blocks DNS
+/// rebinding, where an attacker-resolved hostname still sends our headerless
+/// simple request but the Host header betrays the rebinding.
+fn check_origin(head_str: &str, port: u16) -> Result<(), (&'static str, u16)> {
+    let mut host: Option<String> = None;
+    let mut control_header = false;
+    for line in head_str.lines().skip(1) {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "host" => host = Some(value.trim().to_string()),
+                "x-wallpaper-control" => control_header = true,
+                _ => {}
+            }
+        }
+    }
+    if !control_header {
+        return Err(("missing X-Wallpaper-Control header", 403));
+    }
+    let expected = format!("127.0.0.1:{}", port);
+    if host.as_deref() != Some(expected.as_str()) {
+        return Err(("host header mismatch (DNS rebinding guard)", 403));
+    }
+    Ok(())
+}
+
+fn handle_conn(
+    stream: TcpStream,
+    port: u16,
+    proxy: EventLoopProxy<HostEvent>,
+    pool: Arc<Mutex<AssetPool>>,
+) {
     let mut stream = stream;
     let _ = stream.set_read_timeout(Some(CONN_TIMEOUT));
     let _ = stream.set_write_timeout(Some(CONN_TIMEOUT));
@@ -78,6 +121,12 @@ fn handle_conn(stream: TcpStream, proxy: EventLoopProxy<HostEvent>, pool: Arc<Mu
         respond(&mut stream, 400, "{\"ok\":false,\"error\":\"bad request\"}");
         return;
     };
+    if let Err((reason, status)) = check_origin(head_str, port) {
+        eprintln!("[control] rejected: {}", reason);
+        let body = format!("{{\"ok\":false,\"error\":\"{}\"}}", reason);
+        respond(&mut stream, status, &body);
+        return;
+    }
     let Some(request_line) = head_str.lines().next() else {
         respond(&mut stream, 400, "{\"ok\":false,\"error\":\"bad request\"}");
         return;
@@ -98,48 +147,60 @@ fn handle_conn(stream: TcpStream, proxy: EventLoopProxy<HostEvent>, pool: Arc<Mu
                     p.asset_count(),
                     assignment_json(&p)
                 )
-            });            match body {
+            });
+            match body {
                 Ok(b) => respond(&mut stream, 200, &b),
                 Err(_) => respond(&mut stream, 500, "{\"ok\":false,\"error\":\"pool poisoned\"}"),
             }
         }
+        ("GET", "/swap") => respond(
+            &mut stream,
+            405,
+            "{\"ok\":false,\"error\":\"POST /swap[?slot=<id>] (X-Wallpaper-Control required)\"}",
+        ),
         ("POST", "/swap") => {
             let slot = parse_query(query).into_iter().find(|(k, _)| k == "slot").map(|(_, v)| v);
-            let (swaps, count) = match pool.lock() {
-                Ok(mut p) => {
-                    let count = p.asset_count();
-                    (p.rotate(slot.as_deref()), count)
+            // Send the event while still holding the pool lock so concurrent
+            // control requests enqueue SwapApplied in the same order they
+            // mutated the pool (renderer never lags the pool's assignment).
+            let sent = pool.lock().map(|mut p| {
+                let count = p.asset_count();
+                let swaps = p.rotate(slot.as_deref());
+                if swaps.is_empty() {
+                    return Err(if count < 2 { "need-at-least-2-assets" } else { "unknown-slot" });
+                }
+                let event = HostEvent::SwapApplied {
+                    swaps: swaps.clone(),
+                };
+                if let Err(e) = proxy.send_event(event) {
+                    eprintln!("[control] send_event SwapApplied failed: {:?}", e);
+                }
+                Ok((swaps, count))
+            });
+            match sent {
+                Ok(Ok((swaps, _count))) => {
+                    let body = format!(
+                        "{{\"ok\":true,\"swapped\":{},\"changes\":[{}]}}",
+                        swaps.len(),
+                        swaps
+                            .iter()
+                            .map(|(s, u)| format!("{{\"slot\":\"{}\",\"url\":\"{}\"}}", s, u))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    );
+                    respond(&mut stream, 200, &body);
+                }
+                Ok(Err(reason)) => {
+                    respond(
+                        &mut stream,
+                        409,
+                        &format!("{{\"ok\":false,\"swapped\":0,\"reason\":\"{}\"}}", reason),
+                    );
                 }
                 Err(_) => {
                     respond(&mut stream, 500, "{\"ok\":false,\"error\":\"pool poisoned\"}");
-                    return;
                 }
-            };
-            if swaps.is_empty() {
-                let reason = if count < 2 { "need-at-least-2-assets" } else { "unknown-slot" };
-                respond(
-                    &mut stream,
-                    409,
-                    &format!("{{\"ok\":false,\"swapped\":0,\"reason\":\"{}\"}}", reason),
-                );
-                return;
             }
-            let event = HostEvent::SwapApplied {
-                swaps: swaps.clone(),
-            };
-            if let Err(e) = proxy.send_event(event) {
-                eprintln!("[control] send_event SwapApplied failed: {:?}", e);
-            }
-            let body = format!(
-                "{{\"ok\":true,\"swapped\":{},\"changes\":[{}]}}",
-                swaps.len(),
-                swaps
-                    .iter()
-                    .map(|(s, u)| format!("{{\"slot\":\"{}\",\"url\":\"{}\"}}", s, u))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            respond(&mut stream, 200, &body);
         }
         ("POST", "/reload-assets") => {
             let (count, changed) = match pool.lock() {

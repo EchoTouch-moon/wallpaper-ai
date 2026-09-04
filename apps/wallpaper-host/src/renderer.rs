@@ -64,18 +64,24 @@ pub fn make_handler(
             .header(CONTENT_TYPE, mime.as_str())
             .body(Cow::Owned(bytes))
             .unwrap(),
-        Err(e) => {
-            eprintln!("[renderer] {:?}: {}", request.uri(), e);
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+        // (status, message) errors — missing files are 404, real failures 500
+        // (moonpulse P2.2 review finding 3: stale manifest / deleted chunk
+        // must not spam 500s and mask real breakage).
+        Err((status, msg)) => {
+            eprintln!("[renderer] {:?}: {}", request.uri(), msg);
+            error_response(status, &msg)
         }
     }
 }
+
+/// Either the response bytes + MIME, or a ready (status, message) error.
+type RespResult = Result<(Vec<u8>, String), (StatusCode, String)>;
 
 fn build_response(
     root: &RendererRoot,
     pool: Option<&Arc<Mutex<AssetPool>>>,
     request: &Request<Vec<u8>>,
-) -> Result<(Vec<u8>, String)> {
+) -> RespResult {
     let path = request.uri().path();
 
     // P2.2: manifest = current pool state, regenerated per request.
@@ -84,7 +90,7 @@ fn build_response(
             Some(p) => p
                 .lock()
                 .map(|p| p.manifest_json())
-                .map_err(|_| anyhow!("asset pool poisoned"))?,
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "asset pool poisoned".to_string()))?,
             // No --assets configured: empty manifest, renderer stays on its
             // gradient placeholders.
             None => "{\"assets\":[],\"assignment\":{}}".to_string(),
@@ -101,8 +107,9 @@ fn build_response(
             if let Ok(p) = pool.lock() {
                 if p.knows_file(name) {
                     let candidate = p.file_path(name);
-                    let bytes = std::fs::read(&candidate)
-                        .with_context(|| format!("read {:?}", candidate))?;
+                    let bytes = std::fs::read(&candidate).map_err(|e| {
+                        (internal_or_not_found(&e), format!("read {:?}", candidate))
+                    })?;
                     let mime = mime_guess::from_path(name)
                         .first_or_octet_stream()
                         .essence_str()
@@ -117,7 +124,16 @@ fn build_response(
     serve_static(root, path)
 }
 
-fn serve_static(root: &RendererRoot, path: &str) -> Result<(Vec<u8>, String)> {
+/// 404 for missing files, 500 for anything else.
+fn internal_or_not_found(e: &std::io::Error) -> StatusCode {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        StatusCode::NOT_FOUND
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+fn serve_static(root: &RendererRoot, path: &str) -> RespResult {
     let rel = if path == "/" {
         "index.html"
     } else {
@@ -125,18 +141,29 @@ fn serve_static(root: &RendererRoot, path: &str) -> Result<(Vec<u8>, String)> {
     };
 
     if rel.contains("..") {
-        return Err(anyhow!("path traversal rejected"));
+        return Err((StatusCode::FORBIDDEN, "path traversal rejected".to_string()));
     }
 
     let candidate = root.as_path().join(rel);
-    let canonical_candidate = std::fs::canonicalize(&candidate)
-        .with_context(|| format!("file {:?} not readable", candidate))?;
+    let canonical_candidate = std::fs::canonicalize(&candidate).map_err(|e| {
+        (
+            internal_or_not_found(&e),
+            format!("file {:?} not readable", candidate),
+        )
+    })?;
     if !canonical_candidate.starts_with(root.as_path()) {
-        return Err(anyhow!("path outside renderer root"));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "path outside renderer root".to_string(),
+        ));
     }
 
-    let bytes = std::fs::read(&canonical_candidate)
-        .with_context(|| format!("read {:?}", canonical_candidate))?;
+    let bytes = std::fs::read(&canonical_candidate).map_err(|e| {
+        (
+            internal_or_not_found(&e),
+            format!("read {:?}", canonical_candidate),
+        )
+    })?;
     let mime = mime_guess::from_path(&canonical_candidate)
         .first_or_octet_stream()
         .essence_str()

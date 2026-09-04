@@ -109,6 +109,17 @@ impl AssetPool {
                     .map(|a| (slot.clone(), a.id.clone()))
             })
             .collect();
+        self.rebuild_state(scanned, old_assignment);
+        Ok(())
+    }
+
+    /// Apply a fresh scan: keep surviving assignments (by asset id), then fill
+    /// empty slots preferring indexes NO other slot holds — the "no duplicate
+    /// image on screen" invariant holds across rescan whenever the pool is at
+    /// least as large as the slot count (moonpulse P2.2 review, finding 2:
+    /// the old `i % len` could double-book an index). `i % len` only as the
+    /// last resort when the pool is too small.
+    fn rebuild_state(&mut self, scanned: Vec<AssetEntry>, old_assignment: HashMap<String, String>) {
         self.assets = scanned;
         self.assignment.clear();
         self.cursors.clear();
@@ -118,15 +129,23 @@ impl AssetPool {
                 self.cursors.insert(slot, idx);
             }
         }
-        // Initial assignment only for slots that have none yet.
+        let occupied: std::collections::HashSet<usize> =
+            self.assignment.values().copied().collect();
+        let mut free: Vec<usize> = (0..self.assets.len())
+            .filter(|i| !occupied.contains(i))
+            .collect();
         for (i, slot) in TEMPLATE_SLOTS.iter().enumerate() {
-            if !self.assignment.contains_key(*slot) && !self.assets.is_empty() {
-                let idx = i % self.assets.len();
-                self.assignment.insert(slot.to_string(), idx);
-                self.cursors.insert(slot.to_string(), idx);
+            if self.assignment.contains_key(*slot) || self.assets.is_empty() {
+                continue;
             }
+            let idx = if !free.is_empty() {
+                free.remove(0)
+            } else {
+                i % self.assets.len()
+            };
+            self.assignment.insert(slot.to_string(), idx);
+            self.cursors.insert(slot.to_string(), idx);
         }
-        Ok(())
     }
 
     pub fn asset_count(&self) -> usize {
@@ -326,6 +345,53 @@ mod tests {
         let mut p = pool_with(3);
         let swaps = p.rotate(Some("center"));
         assert_eq!(swaps, vec![("center".into(), "/assets/img2.jpg".into())]);
+    }
+
+    #[test]
+    fn rescan_prefers_unoccupied_for_lost_slots() {
+        // moonpulse P2.2 review finding 2: pool A/B/C/D with left/center/right
+        // = A/B/C; delete B and rescan. The lost slot (center) must take the
+        // only free asset D — NOT right's C (the old i%len double-booked).
+        let mut p = AssetPool {
+            assets_dir: PathBuf::from("."),
+            assets: vec![],
+            assignment: HashMap::new(),
+            cursors: HashMap::new(),
+        };
+        let mk = |id: &str| AssetEntry { name: format!("{}.jpg", id), id: id.to_string() };
+        let old: HashMap<String, String> = [
+            ("left".to_string(), "a".to_string()),
+            ("center".to_string(), "b".to_string()),
+            ("right".to_string(), "c".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        p.rebuild_state(vec![mk("a"), mk("c"), mk("d")], old);
+        assert_eq!(p.assignment.get("left"), Some(&0)); // keeps A
+        assert_eq!(p.assignment.get("right"), Some(&1)); // keeps C
+        assert_eq!(p.assignment.get("center"), Some(&2)); // gets D (was B's slot)
+        let idxs: Vec<usize> = p.assignment.values().copied().collect();
+        let mut sorted = idxs.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 3, "no duplicate on screen after rescan: {:?}", idxs);
+    }
+
+    #[test]
+    fn fresh_scan_assigns_slots_in_order() {
+        // rebuild_state with empty history must reproduce the original
+        // left/center/right = 0/1/2 assignment.
+        let mut p = AssetPool {
+            assets_dir: PathBuf::from("."),
+            assets: vec![],
+            assignment: HashMap::new(),
+            cursors: HashMap::new(),
+        };
+        let mk = |id: &str| AssetEntry { name: format!("{}.jpg", id), id: id.to_string() };
+        p.rebuild_state((0..6).map(|i| mk(&format!("img{}", i))).collect(), HashMap::new());
+        assert_eq!(p.assignment.get("left"), Some(&0));
+        assert_eq!(p.assignment.get("center"), Some(&1));
+        assert_eq!(p.assignment.get("right"), Some(&2));
     }
 
     #[test]
