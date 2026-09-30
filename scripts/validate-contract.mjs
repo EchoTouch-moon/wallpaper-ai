@@ -19,8 +19,10 @@
 
 import process from "node:process";
 
-import { generateLayoutRequestSchema } from "../lib/layout-generation/schema.ts";
-import { aiLayoutPlanResponseSchema } from "../lib/layout-generation/aiPlanSchema.ts";
+import {
+  aiLayoutPlanResponseSchema,
+  generateLayoutRequestSchema,
+} from "@wallpaper/core/layout-generation";
 
 const SCHEMAS = {
   request: generateLayoutRequestSchema,

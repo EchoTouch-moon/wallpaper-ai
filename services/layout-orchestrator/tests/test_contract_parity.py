@@ -2,10 +2,10 @@
 
 The Python orchestrator and the Next.js BFF each own a hand-maintained mirror
 of the layout contract (Pydantic in ``contracts.py``, Zod in
-``lib/layout-generation``). When one side evolves and the other is forgotten,
-requests/responses start to be accepted by one layer and rejected by the
-other. These tests feed the *same* camelCase JSON fixture to both validators
-and assert they always agree.
+``packages/core/src/layout-generation``). When one side evolves and the other
+is forgotten, requests/responses start to be accepted by one layer and
+rejected by the other. These tests feed the *same* camelCase JSON fixture to
+both validators and assert they always agree.
 
 The Zod side is driven through ``scripts/validate-contract.mjs`` (a tiny stdin
 CLI), so the comparison runs against the real runtime schema rather than a
