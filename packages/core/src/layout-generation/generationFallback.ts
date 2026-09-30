@@ -1,4 +1,4 @@
-import { generateMockLayouts } from "./generateMockLayouts.ts";
+import { generateRecipeLayouts } from "./generateRecipeLayouts.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
@@ -19,7 +19,7 @@ export function createFallbackResponse(
   request: GenerateLayoutRequest,
   warning: string,
 ): GenerateLayoutResponse {
-  const result = generateMockLayouts({
+  const result = generateRecipeLayouts({
     ...request,
     intent: {
       ...request.intent,

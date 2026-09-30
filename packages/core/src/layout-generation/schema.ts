@@ -44,7 +44,7 @@ export const generateLayoutRequestSchema = z
         userPrompt: z.string().max(1200).optional(),
       })
       .strict(),
-    assets: z.array(imageAssetAnalysisSchema).min(3),
+    assets: z.array(imageAssetAnalysisSchema).min(2).max(6),
     currentLayout: wallpaperLayoutSchema.optional(),
     options: z
       .object({

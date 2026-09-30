@@ -1,10 +1,12 @@
 import { aiLayoutPlanResponseSchema } from "./aiPlanSchema.ts";
+import { compileTemplateRecipe } from "../layout/compileTemplateRecipe.ts";
 import { calculateCoverCrop, planTemplateCandidate } from "../layout/planTemplate.ts";
 import { getTemplate } from "../layout/templates.ts";
 import { validateLayout } from "../layout/validateLayout.ts";
 import type { AiLayoutPlanResponse } from "./aiPlanSchema.ts";
 import type { GenerateLayoutRequest } from "../types/generateLayout";
 import type { LayoutCandidate } from "../types/layout";
+import type { RejectedLayoutCandidate } from "../types/generateLayout.ts";
 
 export class AiLayoutPlanError extends Error {
   constructor(message: string) {
@@ -18,7 +20,20 @@ function materializeCandidate(
   request: GenerateLayoutRequest,
   index: number,
 ): LayoutCandidate {
-  const template = getTemplate(plan.templateId);
+  const template = plan.recipe
+    ? compileTemplateRecipe({
+        recipe: plan.recipe,
+        ratioId: request.canvas.ratioId,
+        width: request.canvas.width,
+        height: request.canvas.height,
+        assetCount: request.assets.length,
+      })
+    : getTemplate(
+        plan.templateId ??
+          (() => {
+            throw new AiLayoutPlanError("A registered plan requires templateId");
+          })(),
+      );
   if (!template.supportedRatios.includes(request.canvas.ratioId)) {
     throw new AiLayoutPlanError(
       `Template ${template.id} does not support ${request.canvas.ratioId}`,
@@ -60,6 +75,8 @@ function materializeCandidate(
     template,
     templateIndex: index,
     intent: request.intent.compositionIntent,
+    templateSource: plan.recipe ? "generated" : undefined,
+    templateRecipe: plan.recipe ?? undefined,
   });
 
   const items = baseCandidate.layout.items.map((item) => {
@@ -104,7 +121,9 @@ function materializeCandidate(
     },
     notes: [
       ...baseCandidate.layout.notes,
-      `Model plan ${plan.id} was materialized against registered template ${template.id}.`,
+      plan.recipe
+        ? `Model plan ${plan.id} was compiled from a ${plan.recipe.profile} ${plan.recipe.family} recipe.`
+        : `Model plan ${plan.id} was materialized against registered template ${template.id}.`,
     ],
   };
 
@@ -134,4 +153,30 @@ export function materializeAiLayoutPlan(
   return plan.candidates.map((candidate, index) =>
     materializeCandidate(candidate, request, index),
   );
+}
+
+export function materializeAiLayoutPlanSafely(
+  input: unknown,
+  request: GenerateLayoutRequest,
+) {
+  const plan = aiLayoutPlanResponseSchema.parse(input);
+  const candidates: LayoutCandidate[] = [];
+  const rejected: RejectedLayoutCandidate[] = [];
+
+  plan.candidates.forEach((candidate, index) => {
+    try {
+      candidates.push(materializeCandidate(candidate, request, index));
+    } catch (error) {
+      rejected.push({
+        candidateId: candidate.id,
+        source: "ai",
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Unable to materialize AI layout candidate",
+      });
+    }
+  });
+
+  return { candidates, rejected };
 }

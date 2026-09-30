@@ -1,5 +1,6 @@
 import { generateFromTemplate } from "./generateFromTemplate.ts";
 import { generateMockLayouts } from "./generateMockLayouts.ts";
+import { generateRecipeLayouts } from "./generateRecipeLayouts.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
@@ -26,12 +27,12 @@ export function createAiFallbackResponse(
   request: GenerateLayoutRequest,
   reason = "AI mode is not connected yet.",
 ): GenerateLayoutResponse {
-  const result = generateMockLayouts(request);
+  const result = generateRecipeLayouts(request);
   return {
     ...result,
     source: "fallback",
     warnings: [
-      `${reason} Returned mock-ai layout candidates instead.`,
+      `${reason} Returned deterministic recipe candidates instead.`,
     ],
   };
 }

@@ -28,9 +28,16 @@ export function validateLayout(
   if (
     parsed.data.template &&
     templateIds &&
+    parsed.data.template.source !== "generated" &&
     !templateIds.has(parsed.data.template.id)
   ) {
     semanticErrors.push(`Unknown template: ${parsed.data.template.id}`);
+  }
+  if (
+    parsed.data.template?.source === "generated" &&
+    !parsed.data.template.recipe
+  ) {
+    semanticErrors.push("Generated templates require a recipe");
   }
 
   parsed.data.items.forEach((item) => {

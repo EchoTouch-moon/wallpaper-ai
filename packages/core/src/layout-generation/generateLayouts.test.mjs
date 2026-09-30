@@ -53,10 +53,31 @@ test("validates generate layout request shape", () => {
   assert.equal(
     generateLayoutRequestSchema.safeParse({
       ...baseRequest,
-      assets: baseRequest.assets.slice(0, 2),
+      assets: baseRequest.assets.slice(0, 1),
     }).success,
     false,
   );
+  assert.equal(
+    generateLayoutRequestSchema.safeParse({
+      ...baseRequest,
+      assets: [
+        ...baseRequest.assets,
+        analysis("asset_e", "#aa7733"),
+        analysis("asset_f", "#3377aa"),
+        analysis("asset_g", "#77aa33"),
+      ],
+    }).success,
+    false,
+  );
+});
+
+test("accepts two analyzed assets for the composer workflow", () => {
+  const parsed = generateLayoutRequestSchema.safeParse({
+    ...baseRequest,
+    assets: baseRequest.assets.slice(0, 2),
+  });
+
+  assert.equal(parsed.success, true);
 });
 
 test("generates mock-ai candidates through orchestration", () => {
@@ -98,6 +119,17 @@ test("ai mode returns mock fallback with warning for now", () => {
   assert.equal(response.source, "fallback");
   assert.ok(response.warnings?.[0].includes("AI mode is not connected"));
   assert.equal(response.candidates.length, 3);
+  assert.deepEqual(
+    response.candidates.map(
+      (candidate) => candidate.layout.template?.recipe?.profile,
+    ),
+    ["safe", "editorial", "dynamic"],
+  );
+  assert.ok(
+    response.candidates.every(
+      (candidate) => candidate.layout.template?.source === "generated",
+    ),
+  );
 });
 
 test("ai mode throws when fallback is disabled", () => {

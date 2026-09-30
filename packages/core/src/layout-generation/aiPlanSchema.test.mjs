@@ -5,6 +5,7 @@ import { aiLayoutPlanResponseSchema } from "./aiPlanSchema.ts";
 import {
   AiLayoutPlanError,
   materializeAiLayoutPlan,
+  materializeAiLayoutPlanSafely,
 } from "./materializeAiLayoutPlan.ts";
 
 function analysis(assetId, averageColor) {
@@ -73,6 +74,64 @@ test("materializes a constrained AI plan through a registered template", () => {
   assert.equal(candidates[0].layout.items[0].x, 35);
 });
 
+test("compiles and materializes a constrained recipe plan", () => {
+  const recipePlan = {
+    candidates: [
+      {
+        id: "ai_recipe_1",
+        label: "Safe hero grid",
+        reason: "The hero remains prominent while support images stay ordered.",
+        harmonyScore: 0.92,
+        templateId: null,
+        recipe: {
+          version: "1.0",
+          profile: "safe",
+          family: "hero-grid",
+          heroPosition: "left",
+          heroShare: 0.56,
+          supportCount: 2,
+          margin: 0.02,
+          gap: 0.012,
+          cornerRadius: 0.018,
+          rhythm: "ordered",
+          boundary: "clean-gap",
+          safeAreaPolicy: "avoid",
+        },
+        assignments: [
+          { slotId: "hero", assetId: "asset_a", crop: null },
+          { slotId: "support-1", assetId: "asset_b", crop: null },
+          { slotId: "support-2", assetId: "asset_c", crop: null },
+        ],
+        backgroundColor: null,
+      },
+    ],
+  };
+
+  const candidates = materializeAiLayoutPlan(recipePlan, request);
+
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].layout.template.source, "generated");
+  assert.equal(candidates[0].layout.template.recipe.profile, "safe");
+  assert.equal(candidates[0].layout.items.length, 3);
+  assert.deepEqual(
+    candidates[0].layout.items.map((item) => item.assetId),
+    ["asset_a", "asset_b", "asset_c"],
+  );
+});
+
+test("rejects a plan without a registered template or recipe", () => {
+  const result = aiLayoutPlanResponseSchema.safeParse({
+    candidates: [
+      {
+        ...plan(assignments).candidates[0],
+        templateId: null,
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});
+
 test("rejects duplicate slot assignments at the schema boundary", () => {
   const result = aiLayoutPlanResponseSchema.safeParse(
     plan([
@@ -103,6 +162,30 @@ test("rejects unknown assets and missing template slots", () => {
     () => materializeAiLayoutPlan(plan(assignments.slice(0, 2)), request),
     AiLayoutPlanError,
   );
+});
+
+test("isolates a materialization failure to one model candidate", () => {
+  const result = materializeAiLayoutPlanSafely(
+    {
+      candidates: [
+        plan(assignments).candidates[0],
+        {
+          ...plan(assignments).candidates[0],
+          id: "broken_candidate",
+          assignments: assignments.map((assignment, index) =>
+            index === 2
+              ? { ...assignment, assetId: "unknown" }
+              : assignment,
+          ),
+        },
+      ],
+    },
+    request,
+  );
+
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.rejected.length, 1);
+  assert.equal(result.rejected[0].candidateId, "broken_candidate");
 });
 
 test("rejects normalized crop boxes that leave the source image", () => {

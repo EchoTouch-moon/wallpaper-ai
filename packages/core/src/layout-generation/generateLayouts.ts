@@ -6,10 +6,14 @@ import {
 } from "./generationFallback.ts";
 import { generateFromTemplate } from "./generateFromTemplate.ts";
 import { generateMockLayouts } from "./generateMockLayouts.ts";
+import { generateRecipeLayouts } from "./generateRecipeLayouts.ts";
 import { loadLayoutModelConfig } from "./llmConfig.ts";
-import { materializeAiLayoutPlan } from "./materializeAiLayoutPlan.ts";
+import {
+  materializeAiLayoutPlanSafely,
+} from "./materializeAiLayoutPlan.ts";
 import { OpenAICompatibleLayoutProvider } from "./openAiCompatibleProvider.ts";
 import { generateLayoutRequestSchema } from "./schema.ts";
+import { selectDiverseLayoutCandidates } from "./candidateDiversity.ts";
 import type { LayoutModelProvider } from "./provider.ts";
 import type {
   GenerateLayoutRequest,
@@ -80,16 +84,54 @@ export async function generateLayoutsAsync(
       request.operation === "refine"
         ? 1
         : (request.options?.candidateCount ?? request.intent.count ?? 3);
-    const candidates = materializeAiLayoutPlan(plan, request).slice(
-      0,
+    const materialized = materializeAiLayoutPlanSafely(plan, request);
+    const fallbackCandidates =
+      request.operation === "refine" || !isFallbackAllowed(request)
+        ? []
+        : generateRecipeLayouts(request).candidates;
+    const selection = selectDiverseLayoutCandidates(
+      materialized.candidates,
+      fallbackCandidates,
       requestedCount,
     );
+    const usedFallback =
+      selection.candidates.some((candidate) => candidate.usedFallback) ||
+      materialized.rejected.length > 0;
+    const warnings = [
+      ...(materialized.rejected.length > 0
+        ? [
+            `${materialized.rejected.length} model candidate${
+              materialized.rejected.length === 1 ? "" : "s"
+            } failed validation and were replaced when possible.`,
+          ]
+        : []),
+      ...(selection.skippedCandidateIds.length > 0
+        ? [
+            `${selection.skippedCandidateIds.length} near-duplicate candidate${
+              selection.skippedCandidateIds.length === 1 ? "" : "s"
+            } were removed.`,
+          ]
+        : []),
+      ...(usedFallback
+        ? ["Deterministic recipe candidates completed the requested set."]
+        : []),
+    ];
+
+    if (
+      selection.candidates.length < requestedCount &&
+      !isFallbackAllowed(request)
+    ) {
+      throw new LayoutGenerationError(
+        `The layout model produced ${selection.candidates.length} of ${requestedCount} required candidates.`,
+      );
+    }
 
     return ensureGenerated(
       {
-        candidates,
-        rejected: [],
+        candidates: selection.candidates,
+        rejected: materialized.rejected,
         source: "ai",
+        warnings: warnings.length > 0 ? warnings : undefined,
       },
       request,
       "The layout model produced no valid candidates. Returned mock-ai layout candidates instead.",

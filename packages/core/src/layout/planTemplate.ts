@@ -10,6 +10,7 @@ import type {
   WallpaperTemplate,
 } from "../types/layout";
 import type { WallpaperRatioId } from "../types/wallpaper";
+import type { TemplateRecipe } from "./templateRecipe.ts";
 import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 
 export interface TemplatePlanInput {
@@ -19,6 +20,8 @@ export interface TemplatePlanInput {
   template: WallpaperTemplate;
   templateIndex: number;
   intent?: CompositionIntent;
+  templateSource?: "registered" | "generated";
+  templateRecipe?: TemplateRecipe;
 }
 
 function clamp(value: number, minimum = 0, maximum = 1) {
@@ -39,29 +42,59 @@ export function calculateCoverCrop(
 ) {
   const sourceAspect = analysis.aspectRatio;
   const targetAspect = slotWidth / slotHeight;
+  const faceCenter =
+    analysis.faces && analysis.faces.length > 0
+      ? {
+          x:
+            analysis.faces.reduce(
+              (total, face) => total + face.x + face.width / 2,
+              0,
+            ) / analysis.faces.length,
+          y:
+            analysis.faces.reduce(
+              (total, face) => total + face.y + face.height / 2,
+              0,
+            ) / analysis.faces.length,
+        }
+      : null;
+  const subjectCenter = analysis.subjectBox
+    ? {
+        x: analysis.subjectBox.x + analysis.subjectBox.width / 2,
+        y: analysis.subjectBox.y + analysis.subjectBox.height / 2,
+      }
+    : null;
+  const focalPoint =
+    faceCenter ??
+    subjectCenter ??
+    analysis.saliencyCenter ?? { x: 0.5, y: 0.5 };
 
   if (sourceAspect > targetAspect) {
     const width = targetAspect / sourceAspect;
     return {
-      x: (1 - width) / 2,
+      x: clamp(focalPoint.x - width / 2, 0, 1 - width),
       y: 0,
       width,
       height: 1,
-      focalPoint: analysis.saliencyCenter ?? { x: 0.5, y: 0.5 },
+      focalPoint,
     };
   }
 
   const height = sourceAspect / targetAspect;
   const isPortraitInLandscape =
     analysis.orientation === "portrait" && targetAspect > 1;
-  const y = isPortraitInLandscape ? (1 - height) * 0.35 : (1 - height) / 2;
+  const fallbackY = isPortraitInLandscape
+    ? (1 - height) * 0.35
+    : (1 - height) / 2;
+  const y =
+    faceCenter || subjectCenter || analysis.saliencyCenter
+      ? clamp(focalPoint.y - height / 2, 0, 1 - height)
+      : fallbackY;
   return {
     x: 0,
     y,
     width: 1,
     height,
-    focalPoint:
-      analysis.saliencyCenter ?? { x: 0.5, y: isPortraitInLandscape ? 0.42 : 0.5 },
+    focalPoint,
   };
 }
 
@@ -296,6 +329,8 @@ export function planTemplateCandidate({
   template,
   templateIndex,
   intent,
+  templateSource,
+  templateRecipe,
 }: TemplatePlanInput): LayoutCandidate {
   const assetsBySlot = selectAssetsForSlots(template, analyses);
   const items = template.slots.map((slot, slotIndex) => {
@@ -330,7 +365,12 @@ export function planTemplateCandidate({
       usage,
       backgroundColor: backgroundColorForTemplate(template, analyses),
     },
-    template: { id: template.id, type: template.type },
+    template: {
+      id: template.id,
+      type: template.type,
+      ...(templateSource ? { source: templateSource } : {}),
+      ...(templateRecipe ? { recipe: templateRecipe } : {}),
+    },
     items,
     safeAreas: createSafeAreas(ratioId, canvasSize.width, canvasSize.height),
     guidance: {

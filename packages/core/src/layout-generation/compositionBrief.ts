@@ -1,0 +1,106 @@
+import { z } from "zod";
+
+import { safeAreaTypeSchema } from "../layout/layoutSchema.ts";
+
+export const compositionTargetSchema = z
+  .object({
+    ratioId: z.enum([
+      "16:9",
+      "16:10",
+      "21:9",
+      "9:16",
+      "9:19.5",
+      "custom",
+    ]),
+    width: z.number().int().min(720).max(7680),
+    height: z.number().int().min(720).max(7680),
+    usage: z.enum([
+      "desktop",
+      "laptop",
+      "ultrawide",
+      "mobile",
+      "lock-screen",
+    ]),
+  })
+  .strict()
+  .superRefine((target, context) => {
+    const ratio = target.width / target.height;
+    if (ratio < 0.4 || ratio > 3) {
+      context.addIssue({
+        code: "custom",
+        message: "Target aspect ratio must remain between 0.4 and 3",
+        path: ["width"],
+      });
+    }
+    if (target.width * target.height > 33_000_000) {
+      context.addIssue({
+        code: "custom",
+        message: "Target canvas must not exceed 33 megapixels",
+        path: ["width"],
+      });
+    }
+  });
+
+export const compositionBriefSchema = z
+  .object({
+    version: z.literal("1.0"),
+    target: compositionTargetSchema,
+    intent: z
+      .object({
+        prompt: z.string().trim().max(1200),
+        heroAssetId: z.string().min(1).optional(),
+        hierarchy: z.enum(["single-hero", "hero-support", "balanced"]),
+        density: z.enum(["minimal", "balanced", "dense"]),
+        rhythm: z.enum(["ordered", "asymmetric", "layered"]),
+        visualFlow: z.enum([
+          "left-to-right",
+          "right-to-left",
+          "top-to-bottom",
+          "center-out",
+        ]),
+        moodTags: z.array(z.string().trim().min(1).max(32)).max(8),
+      })
+      .strict(),
+    constraints: z
+      .object({
+        safeAreas: z.array(safeAreaTypeSchema).max(6),
+        preserveFaces: z.boolean(),
+        preserveText: z.boolean(),
+        cropTolerance: z.enum(["low", "medium", "high"]),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type CompositionTarget = z.infer<typeof compositionTargetSchema>;
+export type CompositionBrief = z.infer<typeof compositionBriefSchema>;
+
+export function createDefaultCompositionBrief(
+  target: CompositionTarget,
+): CompositionBrief {
+  const mobile =
+    target.usage === "mobile" || target.usage === "lock-screen";
+  return compositionBriefSchema.parse({
+    version: "1.0",
+    target,
+    intent: {
+      prompt: "",
+      hierarchy: "hero-support",
+      density: "balanced",
+      rhythm: "ordered",
+      visualFlow: mobile ? "top-to-bottom" : "left-to-right",
+      moodTags: [],
+    },
+    constraints: {
+      safeAreas:
+        target.usage === "lock-screen"
+          ? ["mobile-clock"]
+          : mobile
+            ? ["mobile-widget-center"]
+            : ["desktop-icons-left", "desktop-dock"],
+      preserveFaces: true,
+      preserveText: true,
+      cropTolerance: "medium",
+    },
+  });
+}

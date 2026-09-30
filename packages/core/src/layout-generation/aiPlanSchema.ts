@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { normalizedBoxSchema, normalizedPointSchema } from "../layout/layoutSchema.ts";
+import { templateRecipeSchema } from "../layout/templateRecipe.ts";
 
 export const aiLayoutOperationSchema = z.enum(["generate", "refine"]);
 
@@ -22,7 +23,8 @@ export const aiLayoutPlanCandidateSchema = z
     label: z.string().min(1).max(80),
     reason: z.string().min(1).max(500),
     harmonyScore: z.number().min(0).max(1),
-    templateId: z.string().min(1),
+    templateId: z.string().min(1).nullable(),
+    recipe: templateRecipeSchema.nullable().optional(),
     assignments: z.array(aiSlotAssignmentSchema).min(1),
     backgroundColor: z
       .string()
@@ -31,6 +33,20 @@ export const aiLayoutPlanCandidateSchema = z
   })
   .strict()
   .superRefine((candidate, context) => {
+    if (!candidate.templateId && !candidate.recipe) {
+      context.addIssue({
+        code: "custom",
+        message: "A candidate requires either templateId or recipe",
+        path: ["recipe"],
+      });
+    }
+    if (candidate.templateId && candidate.recipe) {
+      context.addIssue({
+        code: "custom",
+        message: "A candidate cannot use templateId and recipe together",
+        path: ["recipe"],
+      });
+    }
     const slotIds = new Set<string>();
     candidate.assignments.forEach((assignment, index) => {
       if (slotIds.has(assignment.slotId)) {

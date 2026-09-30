@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { templateRecipeSchema } from "./templateRecipe.ts";
 
 const normalizedNumberSchema = z.number().min(0).max(1);
 
@@ -61,16 +62,18 @@ export const imageAssetAnalysisSchema = z.object({
   cropSafety: z.enum(["high", "medium", "low"]).optional(),
 });
 
+export const safeAreaTypeSchema = z.enum([
+  "desktop-icons-left",
+  "desktop-icons-right",
+  "desktop-dock",
+  "mobile-clock",
+  "mobile-widget-center",
+  "subject-protection",
+]);
+
 export const safeAreaSchema = z.object({
   id: z.string().min(1),
-  type: z.enum([
-    "desktop-icons-left",
-    "desktop-icons-right",
-    "desktop-dock",
-    "mobile-clock",
-    "mobile-widget-center",
-    "subject-protection",
-  ]),
+  type: safeAreaTypeSchema,
   x: z.number().nonnegative(),
   y: z.number().nonnegative(),
   width: z.number().positive(),
@@ -82,6 +85,9 @@ export const templateTypeSchema = z.enum([
   "layered-moodboard",
   "portrait-triptych",
   "irregular-collage",
+  "hero-grid",
+  "balanced-mosaic",
+  "stacked-story",
 ]);
 
 export const templateSlotSchema = z.object({
@@ -234,6 +240,8 @@ export const wallpaperLayoutSchema = z
       .object({
         id: z.string().min(1),
         type: templateTypeSchema,
+        source: z.enum(["registered", "generated"]).optional(),
+        recipe: templateRecipeSchema.optional(),
       })
       .optional(),
     items: z.array(wallpaperItemSchema),
