@@ -11,7 +11,7 @@ import {
   compositionGenerationResponseSchema,
 } from "./compositionContracts.ts";
 
-import type { CompositionBrief } from "./compositionBrief.ts";
+import { planningRatio, type CompositionBrief } from "./compositionBrief.ts";
 import type { CompositionGenerationRequest } from "./compositionContracts.ts";
 import type { TemplateRecipe } from "../layout/templateRecipe.ts";
 import type {
@@ -19,7 +19,6 @@ import type {
   LayoutCandidate,
   WallpaperLayout,
 } from "../types/layout.ts";
-import type { WallpaperRatioId } from "../types/wallpaper.ts";
 
 interface CompositionCandidatePlan {
   id: string;
@@ -56,19 +55,6 @@ const PROFILE_COPY = {
       "Controlled overlap and scale contrast create a deeper spatial composition.",
   },
 } as const;
-
-function planningRatio(brief: CompositionBrief): WallpaperRatioId {
-  if (brief.target.ratioId !== "custom") {
-    return brief.target.ratioId;
-  }
-  if (brief.target.height > brief.target.width) {
-    return "9:16";
-  }
-  if (brief.target.width / brief.target.height > 2) {
-    return "21:9";
-  }
-  return "16:9";
-}
 
 function safeAreasForBrief(
   brief: CompositionBrief,

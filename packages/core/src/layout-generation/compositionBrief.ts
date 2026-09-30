@@ -1,6 +1,22 @@
 import { z } from "zod";
 
 import { safeAreaTypeSchema } from "../layout/layoutSchema.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
+
+// Nearest known ratio for planning heuristics when a brief targets custom
+// dimensions; non-custom targets pass through unchanged.
+export function planningRatio(brief: CompositionBrief): WallpaperRatioId {
+  if (brief.target.ratioId !== "custom") {
+    return brief.target.ratioId;
+  }
+  if (brief.target.height > brief.target.width) {
+    return "9:16";
+  }
+  if (brief.target.width / brief.target.height > 2) {
+    return "21:9";
+  }
+  return "16:9";
+}
 
 export const compositionTargetSchema = z
   .object({

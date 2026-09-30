@@ -12,28 +12,14 @@ import { refineTemplateRecipe } from "./refineTemplateRecipe.ts";
 import { loadLayoutModelConfig } from "./llmConfig.ts";
 import { OpenAICompatibleLayoutProvider } from "./openAiCompatibleProvider.ts";
 
-import type { CompositionBrief } from "./compositionBrief.ts";
+import { planningRatio, type CompositionBrief } from "./compositionBrief.ts";
 import type { LayoutModelProvider } from "./provider.ts";
 import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 import type { WallpaperLayout } from "../types/layout.ts";
-import type { WallpaperRatioId } from "../types/wallpaper.ts";
 
 interface CompositionGenerationDependencies {
   provider?: LayoutModelProvider;
   environment?: Record<string, string | undefined>;
-}
-
-function planningRatio(brief: CompositionBrief): WallpaperRatioId {
-  if (brief.target.ratioId !== "custom") {
-    return brief.target.ratioId;
-  }
-  if (brief.target.height > brief.target.width) {
-    return "9:16";
-  }
-  if (brief.target.width / brief.target.height > 2) {
-    return "21:9";
-  }
-  return "16:9";
 }
 
 function legacyRequest(
