@@ -1,5 +1,5 @@
 import { EditorProvider } from "@/components/editor/EditorProvider";
-import { EditorWorkspace } from "@/components/editor/EditorWorkspace";
+import { CanvasFirstWorkspace as EditorWorkspace } from "@/components/editor/CanvasFirstWorkspace";
 
 export default function EditorPage() {
   return (
