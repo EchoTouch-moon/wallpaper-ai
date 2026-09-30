@@ -4,18 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  compositionBriefSchema,
   compositionRefineRequestSchema,
-} from "../../packages/core/src/layout-generation/compositionContracts.ts";
-import { compositionBriefSchema } from "../../packages/core/src/layout-generation/compositionBrief.ts";
-import {
   generateCompositionCandidatesAsync,
   refineCompositionCandidateAsync,
-} from "../../packages/core/src/layout-generation/generateCompositionCandidatesAsync.ts";
-import {
-  layoutCandidateSchema,
-} from "../../packages/core/src/layout/layoutSchema.ts";
-import type { LayoutCandidate } from "../../packages/core/src/types/layout.ts";
-import type { LayoutModelProvider } from "../../packages/core/src/layout-generation/provider.ts";
+  type LayoutModelProvider,
+} from "@wallpaper/core/layout-generation";
+import { layoutCandidateSchema } from "@wallpaper/core/layout";
+import type { LayoutCandidate } from "@wallpaper/core/types";
 import { z } from "zod";
 
 import type { TemporaryAssetRecord } from "./temporaryAssetStore.ts";
@@ -23,7 +19,8 @@ import type { TemporaryAssetRecord } from "./temporaryAssetStore.ts";
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_REVISIONS = 20;
 
-const compositionRevisionSchema = z
+const buildCompositionRevisionSchema = () =>
+  z
   .object({
     id: z.string().uuid(),
     candidateId: z.string().min(1),
@@ -33,7 +30,10 @@ const compositionRevisionSchema = z
   })
   .strict();
 
-const compositionSessionRecordSchema = z
+const compositionRevisionSchema = z.lazy(buildCompositionRevisionSchema);
+
+const buildCompositionSessionRecordSchema = () =>
+  z
   .object({
     version: z.literal("1.0"),
     id: z.string().uuid(),
@@ -57,6 +57,10 @@ const compositionSessionRecordSchema = z
     expiresAt: z.string().datetime(),
   })
   .strict();
+
+const compositionSessionRecordSchema = z.lazy(
+  buildCompositionSessionRecordSchema,
+);
 
 export type CompositionSessionRecord = z.infer<
   typeof compositionSessionRecordSchema

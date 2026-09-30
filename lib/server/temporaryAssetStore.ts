@@ -3,8 +3,8 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { analyzePixels } from "../../packages/core/src/image/colorAnalysis.ts";
-import { imageAssetAnalysisSchema } from "../../packages/core/src/layout/layoutSchema.ts";
+import { analyzePixels } from "@wallpaper/core/image";
+import { imageAssetAnalysisSchema } from "@wallpaper/core/layout";
 import sharp from "sharp";
 import { z } from "zod";
 
@@ -25,7 +25,8 @@ const ACCEPTED_MIME_TYPES = new Set([
   "image/webp",
 ]);
 
-const temporaryAssetRecordSchema = z
+const buildTemporaryAssetRecordSchema = () =>
+  z
   .object({
     version: z.literal("1.0"),
     id: z.string().uuid(),
@@ -43,6 +44,8 @@ const temporaryAssetRecordSchema = z
     expiresAt: z.string().datetime(),
   })
   .strict();
+
+const temporaryAssetRecordSchema = z.lazy(buildTemporaryAssetRecordSchema);
 
 export type TemporaryAssetRecord = z.infer<
   typeof temporaryAssetRecordSchema
