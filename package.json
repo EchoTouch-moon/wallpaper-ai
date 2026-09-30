@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",
     "test": "node --test --experimental-strip-types app/api/*/*.test.mjs",
@@ -21,6 +21,7 @@
     "openai": "^6.42.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "0.34.5",
     "zod": "^4.4.3",
     "zustand": "^5.0.0"
   },

@@ -168,6 +168,56 @@ test("generate-layout async API materializes an injected provider plan", async (
   assert.equal(response.body.candidates[0].id, "provider_candidate");
 });
 
+test("generate-layout async API replaces one invalid model candidate", async () => {
+  const valid = {
+    id: "provider_candidate",
+    label: "Provider triptych",
+    reason: "The provider selected a registered template.",
+    harmonyScore: 0.91,
+    templateId: "triptych_desktop_equal",
+    assignments: [
+      { slotId: "left", assetId: "asset_a", crop: null },
+      { slotId: "center", assetId: "asset_b", crop: null },
+      { slotId: "right", assetId: "asset_c", crop: null },
+    ],
+    backgroundColor: null,
+  };
+  const response = await handleGenerateLayoutRequestAsync(
+    {
+      ...requestBody,
+      operation: "generate",
+      intent: { ...requestBody.intent, mode: "ai", count: 3 },
+      options: { candidateCount: 3, allowFallback: true },
+    },
+    {
+      provider: {
+        async generatePlan() {
+          return {
+            candidates: [
+              valid,
+              {
+                ...valid,
+                id: "invalid_provider_candidate",
+                assignments: valid.assignments.map((assignment, index) =>
+                  index === 2
+                    ? { ...assignment, assetId: "unknown" }
+                    : assignment,
+                ),
+              },
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.source, "ai");
+  assert.equal(response.body.candidates.length, 3);
+  assert.equal(response.body.rejected.length, 1);
+  assert.match(response.body.warnings.join(" "), /failed validation/);
+});
+
 test("generate-layout validates refine requests before calling the provider", async () => {
   const response = await handleGenerateLayoutRequestAsync(
     {
