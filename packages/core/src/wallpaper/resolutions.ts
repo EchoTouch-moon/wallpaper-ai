@@ -1,4 +1,4 @@
-import type { CanvasSize } from "../types/canvas";
+import type { CanvasSize } from "../types/canvas.ts";
 
 export const RESOLUTION_PRESETS: CanvasSize[] = [
   { width: 1920, height: 1080 },

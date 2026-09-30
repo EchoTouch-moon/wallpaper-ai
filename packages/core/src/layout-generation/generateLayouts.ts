@@ -18,7 +18,7 @@ import type { LayoutModelProvider } from "./provider.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
-} from "../types/generateLayout";
+} from "../types/generateLayout.ts";
 
 export { LayoutGenerationError } from "./generationFallback.ts";
 

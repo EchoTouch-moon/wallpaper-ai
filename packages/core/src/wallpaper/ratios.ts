@@ -1,4 +1,4 @@
-import type { WallpaperRatio } from "../types/wallpaper";
+import type { WallpaperRatio } from "../types/wallpaper.ts";
 
 export const RATIO_PRESETS: WallpaperRatio[] = [
   { id: "16:9", label: "16:9 Desktop", width: 1920, height: 1080 },

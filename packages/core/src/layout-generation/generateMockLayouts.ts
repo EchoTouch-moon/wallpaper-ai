@@ -2,8 +2,8 @@ import { generateTemplateCandidates } from "../layout/planTemplate.ts";
 import { selectTemplates, selectTemplateTypes } from "./selectTemplate.ts";
 import { scoreLayout } from "./scoreLayout.ts";
 import { validateCandidates } from "./validateCandidates.ts";
-import type { LayoutCandidate, TemplateType } from "../types/layout";
-import type { GenerateLayoutRequest } from "../types/generateLayout";
+import type { LayoutCandidate, TemplateType } from "../types/layout.ts";
+import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 
 function candidateType(candidate: LayoutCandidate) {
   return candidate.layout.template?.type;

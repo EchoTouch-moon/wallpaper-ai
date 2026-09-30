@@ -3,9 +3,9 @@ import type {
   ImageAssetAnalysis,
   LayoutCandidate,
   WallpaperLayout,
-} from "./layout";
-import type { WallpaperRatioId } from "./wallpaper";
-import type { AiLayoutOperation } from "../layout-generation/aiPlanSchema";
+} from "./layout.ts";
+import type { WallpaperRatioId } from "./wallpaper.ts";
+import type { AiLayoutOperation } from "../layout-generation/aiPlanSchema.ts";
 
 export type GenerateLayoutMode = "template" | "mock-ai" | "ai";
 

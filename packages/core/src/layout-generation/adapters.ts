@@ -4,8 +4,8 @@ import { generateRecipeLayouts } from "./generateRecipeLayouts.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
-} from "../types/generateLayout";
-import type { LayoutCandidate } from "../types/layout";
+} from "../types/generateLayout.ts";
+import type { LayoutCandidate } from "../types/layout.ts";
 
 export interface LayoutModelAdapter {
   generateLayouts(request: GenerateLayoutRequest): Promise<LayoutCandidate[]>;

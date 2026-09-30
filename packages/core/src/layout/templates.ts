@@ -1,5 +1,5 @@
 import { wallpaperTemplateSchema } from "./layoutSchema.ts";
-import type { WallpaperTemplate } from "../types/layout";
+import type { WallpaperTemplate } from "../types/layout.ts";
 
 const DESKTOP_RATIOS = ["16:9", "16:10", "21:9"];
 const MOBILE_RATIOS = ["9:16", "9:19.5"];

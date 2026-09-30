@@ -6,8 +6,8 @@ import {
 import { planTemplateCandidate } from "../layout/planTemplate.ts";
 import { validateCandidates } from "./validateCandidates.ts";
 
-import type { GenerateLayoutRequest } from "../types/generateLayout";
-import type { LayoutCandidate } from "../types/layout";
+import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
+import type { LayoutCandidate } from "../types/layout.ts";
 
 const PROFILE_COPY = {
   safe: {

@@ -4,7 +4,7 @@ import type {
   AiLayoutPlanCandidate,
   AiLayoutPlanResponse,
 } from "./aiPlanSchema.ts";
-import type { GenerateLayoutRequest } from "../types/generateLayout";
+import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 
 export class LangGraphOrchestratorError extends Error {}
 

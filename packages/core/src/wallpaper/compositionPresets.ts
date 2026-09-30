@@ -2,7 +2,7 @@ import type {
   CompositionIntent,
   ImageTransition,
   LayoutGuidance,
-} from "../types/layout";
+} from "../types/layout.ts";
 
 export interface CompositionPreset {
   id: CompositionIntent;

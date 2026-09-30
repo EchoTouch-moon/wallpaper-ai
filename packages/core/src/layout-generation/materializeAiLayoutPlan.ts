@@ -4,8 +4,8 @@ import { calculateCoverCrop, planTemplateCandidate } from "../layout/planTemplat
 import { getTemplate } from "../layout/templates.ts";
 import { validateLayout } from "../layout/validateLayout.ts";
 import type { AiLayoutPlanResponse } from "./aiPlanSchema.ts";
-import type { GenerateLayoutRequest } from "../types/generateLayout";
-import type { LayoutCandidate } from "../types/layout";
+import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
+import type { LayoutCandidate } from "../types/layout.ts";
 import type { RejectedLayoutCandidate } from "../types/generateLayout.ts";
 
 export class AiLayoutPlanError extends Error {

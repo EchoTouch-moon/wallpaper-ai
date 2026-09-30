@@ -1,14 +1,14 @@
 import { generateTemplateCandidates } from "./planTemplate.ts";
 import { validateLayout } from "./validateLayout.ts";
 import { WALLPAPER_TEMPLATES, WALLPAPER_TEMPLATE_IDS } from "./templates.ts";
-import type { CanvasSize } from "../types/canvas";
+import type { CanvasSize } from "../types/canvas.ts";
 import type {
   CompositionIntent,
   ImageAssetAnalysis,
   LayoutCandidate,
   WallpaperLayout,
-} from "../types/layout";
-import type { WallpaperRatioId } from "../types/wallpaper";
+} from "../types/layout.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
 
 export interface LayoutGenerationInput {
   analyses: ImageAssetAnalysis[];

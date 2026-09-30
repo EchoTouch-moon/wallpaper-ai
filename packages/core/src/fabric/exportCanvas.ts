@@ -1,5 +1,5 @@
 import type { Canvas } from "fabric";
-import type { CanvasSize } from "../types/canvas";
+import type { CanvasSize } from "../types/canvas.ts";
 
 const IDENTITY_VIEWPORT: [number, number, number, number, number, number] = [
   1, 0, 0, 1, 0, 0,

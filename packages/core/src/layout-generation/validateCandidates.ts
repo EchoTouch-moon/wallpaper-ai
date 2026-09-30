@@ -1,11 +1,11 @@
 import { validateLayout } from "../layout/validateLayout.ts";
 import { WALLPAPER_TEMPLATE_IDS } from "../layout/templates.ts";
-import type { LayoutCandidate } from "../types/layout";
+import type { LayoutCandidate } from "../types/layout.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutSource,
   RejectedLayoutCandidate,
-} from "../types/generateLayout";
+} from "../types/generateLayout.ts";
 
 export function validateCandidates(
   candidates: LayoutCandidate[],

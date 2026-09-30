@@ -1,4 +1,4 @@
-import type { WallpaperItem } from "../types/layout";
+import type { WallpaperItem } from "../types/layout.ts";
 
 interface OriginalSize {
   width: number;

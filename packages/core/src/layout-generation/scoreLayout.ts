@@ -1,6 +1,6 @@
 import { selectTemplateTypes } from "./selectTemplate.ts";
-import type { LayoutCandidate } from "../types/layout";
-import type { GenerateLayoutRequest } from "../types/generateLayout";
+import type { LayoutCandidate } from "../types/layout.ts";
+import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 
 export interface LayoutScore {
   total: number;

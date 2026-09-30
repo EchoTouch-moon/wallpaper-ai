@@ -1,6 +1,6 @@
 import { colorDistance, hexToHsl } from "../image/colorAnalysis.ts";
 import { wallpaperLayoutSchema } from "./layoutSchema.ts";
-import type { CanvasSize } from "../types/canvas";
+import type { CanvasSize } from "../types/canvas.ts";
 import type {
   CompositionIntent,
   ImageAssetAnalysis,
@@ -8,8 +8,8 @@ import type {
   TemplateSlot,
   WallpaperItem,
   WallpaperTemplate,
-} from "../types/layout";
-import type { WallpaperRatioId } from "../types/wallpaper";
+} from "../types/layout.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
 import type { TemplateRecipe } from "./templateRecipe.ts";
 import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 

@@ -2,7 +2,7 @@ import { generateRecipeLayouts } from "./generateRecipeLayouts.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
-} from "../types/generateLayout";
+} from "../types/generateLayout.ts";
 
 export class LayoutGenerationError extends Error {
   constructor(message: string) {

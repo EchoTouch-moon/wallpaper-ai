@@ -1,5 +1,5 @@
 import { Canvas } from "fabric";
-import type { CanvasSize } from "../types/canvas";
+import type { CanvasSize } from "../types/canvas.ts";
 
 interface PreviewBounds {
   width: number;

@@ -1,5 +1,5 @@
-import type { SafeArea } from "./wallpaper";
-import type { WallpaperItem } from "./layout";
+import type { SafeArea } from "./wallpaper.ts";
+import type { WallpaperItem } from "./layout.ts";
 
 export interface CanvasSize {
   width: number;

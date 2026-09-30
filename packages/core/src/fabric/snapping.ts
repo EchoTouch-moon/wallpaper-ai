@@ -1,5 +1,5 @@
 import type { Canvas, FabricObject } from "fabric";
-import type { SnapGuides } from "../types/canvas";
+import type { SnapGuides } from "../types/canvas.ts";
 
 interface SnapCandidate {
   value: number;

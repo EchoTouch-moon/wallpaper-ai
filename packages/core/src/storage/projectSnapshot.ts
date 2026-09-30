@@ -1,11 +1,11 @@
 import { editorProjectSchema } from "../layout/layoutSchema.ts";
-import type { ImageAsset } from "../types/asset";
-import type { LayoutCandidate, WallpaperLayout } from "../types/layout";
-import type { WallpaperRatioId } from "../types/wallpaper";
+import type { ImageAsset } from "../types/asset.ts";
+import type { LayoutCandidate, WallpaperLayout } from "../types/layout.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
 import type {
   GenerateLayoutResponse,
   GenerateLayoutSource,
-} from "../types/generateLayout";
+} from "../types/generateLayout.ts";
 
 type LayoutSession = NonNullable<GenerateLayoutResponse["session"]>;
 

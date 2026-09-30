@@ -1,4 +1,4 @@
-import type { WallpaperLayout } from "../types/layout";
+import type { WallpaperLayout } from "../types/layout.ts";
 
 interface AssetSize {
   id: string;

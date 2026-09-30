@@ -1,4 +1,4 @@
-import type { ImageAssetAnalysis } from "./layout";
+import type { ImageAssetAnalysis } from "./layout.ts";
 
 export interface ImageAsset {
   id: string;

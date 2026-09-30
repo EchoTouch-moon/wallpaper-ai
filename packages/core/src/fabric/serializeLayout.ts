@@ -1,8 +1,8 @@
 import { FabricImage, type Canvas as FabricCanvas } from "fabric";
-import { fabricGeometryToLayoutItem } from "./layoutGeometry";
-import { wallpaperLayoutSchema } from "../layout/layoutSchema";
-import type { LayoutFabricImage } from "./applyLayout";
-import type { WallpaperLayout } from "../types/layout";
+import { fabricGeometryToLayoutItem } from "./layoutGeometry.ts";
+import { wallpaperLayoutSchema } from "../layout/layoutSchema.ts";
+import type { LayoutFabricImage } from "./applyLayout.ts";
+import type { WallpaperLayout } from "../types/layout.ts";
 
 export function serializeCanvasLayout(
   canvas: FabricCanvas,

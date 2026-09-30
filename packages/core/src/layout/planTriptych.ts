@@ -1,8 +1,8 @@
 import { generateTemplateCandidates } from "./planTemplate.ts";
 import { WALLPAPER_TEMPLATES } from "./templates.ts";
-import type { CanvasSize } from "../types/canvas";
-import type { ImageAssetAnalysis } from "../types/layout";
-import type { WallpaperRatioId } from "../types/wallpaper";
+import type { CanvasSize } from "../types/canvas.ts";
+import type { ImageAssetAnalysis } from "../types/layout.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
 
 export function generateTriptychCandidates(
   analyses: ImageAssetAnalysis[],

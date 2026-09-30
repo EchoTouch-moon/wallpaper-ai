@@ -4,9 +4,9 @@ import {
   Shadow,
   type Canvas as FabricCanvas,
 } from "fabric";
-import { layoutItemToFabricGeometry } from "./layoutGeometry";
-import type { ImageAsset } from "../types/asset";
-import type { WallpaperItem, WallpaperLayout } from "../types/layout";
+import { layoutItemToFabricGeometry } from "./layoutGeometry.ts";
+import type { ImageAsset } from "../types/asset.ts";
+import type { WallpaperItem, WallpaperLayout } from "../types/layout.ts";
 
 export interface LayoutFabricImage extends FabricImage {
   objectId?: string;

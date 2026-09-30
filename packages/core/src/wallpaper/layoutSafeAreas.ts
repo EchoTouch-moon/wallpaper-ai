@@ -1,5 +1,5 @@
-import type { WallpaperLayout } from "../types/layout";
-import type { WallpaperRatioId } from "../types/wallpaper";
+import type { WallpaperLayout } from "../types/layout.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
 
 export function createSafeAreas(
   ratioId: WallpaperRatioId,

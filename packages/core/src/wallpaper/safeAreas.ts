@@ -1,4 +1,4 @@
-import type { SafeAreaType } from "../types/wallpaper";
+import type { SafeAreaType } from "../types/wallpaper.ts";
 
 export const SAFE_AREA_LABELS: Record<SafeAreaType, string> = {
   "desktop-icons-left": "Left desktop icons",

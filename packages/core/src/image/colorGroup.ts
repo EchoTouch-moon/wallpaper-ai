@@ -1,5 +1,5 @@
 import { colorDistance, hexToHsl } from "./colorAnalysis.ts";
-import type { ImageAssetAnalysis } from "../types/layout";
+import type { ImageAssetAnalysis } from "../types/layout.ts";
 
 export interface ColorGroup {
   id: string;

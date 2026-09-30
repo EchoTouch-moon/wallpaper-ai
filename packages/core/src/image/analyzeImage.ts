@@ -1,5 +1,5 @@
-import { analyzePixels } from "./colorAnalysis";
-import type { ImageAssetAnalysis } from "../types/layout";
+import { analyzePixels } from "./colorAnalysis.ts";
+import type { ImageAssetAnalysis } from "../types/layout.ts";
 
 const SAMPLE_LIMIT = 96;
 

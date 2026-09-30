@@ -1,5 +1,5 @@
-import type { ImageAsset } from "../types/asset";
-import { analyzeImage } from "./analyzeImage";
+import type { ImageAsset } from "../types/asset.ts";
+import { analyzeImage } from "./analyzeImage.ts";
 
 const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 

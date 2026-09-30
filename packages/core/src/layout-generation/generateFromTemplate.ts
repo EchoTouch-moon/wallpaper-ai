@@ -2,7 +2,7 @@ import { generateTemplateCandidates } from "../layout/planTemplate.ts";
 import { selectTemplates } from "./selectTemplate.ts";
 import { scoreLayout } from "./scoreLayout.ts";
 import { validateCandidates } from "./validateCandidates.ts";
-import type { GenerateLayoutRequest } from "../types/generateLayout";
+import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 
 export function generateFromTemplate(request: GenerateLayoutRequest) {
   const candidateCount = request.options?.candidateCount ?? request.intent.count ?? 3;

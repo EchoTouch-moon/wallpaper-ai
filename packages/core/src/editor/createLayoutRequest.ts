@@ -1,14 +1,14 @@
 import type {
   GenerateLayoutMode,
   GenerateLayoutRequest,
-} from "../types/generateLayout";
+} from "../types/generateLayout.ts";
 import type {
   CompositionIntent,
   ImageAssetAnalysis,
   WallpaperLayout,
-} from "../types/layout";
-import type { CanvasSize } from "../types/canvas";
-import type { WallpaperRatioId } from "../types/wallpaper";
+} from "../types/layout.ts";
+import type { CanvasSize } from "../types/canvas.ts";
+import type { WallpaperRatioId } from "../types/wallpaper.ts";
 
 interface CreateLayoutRequestInput {
   operation: "generate" | "refine";

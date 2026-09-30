@@ -5,7 +5,7 @@ import {
 } from "./generateLayouts.ts";
 import { LayoutGenerationError } from "./generationFallback.ts";
 import { generateLayoutRequestSchema } from "./schema.ts";
-import type { GenerateLayoutResponse } from "../types/generateLayout";
+import type { GenerateLayoutResponse } from "../types/generateLayout.ts";
 import type { LayoutModelProvider } from "./provider.ts";
 
 export interface GenerateLayoutIssue {

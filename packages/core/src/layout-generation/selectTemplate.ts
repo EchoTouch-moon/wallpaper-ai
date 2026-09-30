@@ -1,10 +1,10 @@
 import { groupAssetsByColor } from "../image/colorGroup.ts";
 import { WALLPAPER_TEMPLATES } from "../layout/templates.ts";
-import type { ImageAssetAnalysis, TemplateType } from "../types/layout";
+import type { ImageAssetAnalysis, TemplateType } from "../types/layout.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutStyle,
-} from "../types/generateLayout";
+} from "../types/generateLayout.ts";
 
 const STYLE_TO_TEMPLATE_TYPE: Record<
   Exclude<GenerateLayoutStyle, "auto">,

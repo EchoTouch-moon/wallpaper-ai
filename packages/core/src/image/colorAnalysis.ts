@@ -1,4 +1,4 @@
-import type { ImageAssetAnalysis } from "../types/layout";
+import type { ImageAssetAnalysis } from "../types/layout.ts";
 
 export interface HslColor {
   hue: number;

@@ -7,7 +7,7 @@ import type {
   WallpaperItem,
   WallpaperLayout,
   WallpaperTemplate,
-} from "../layout/layoutTypes";
+} from "../layout/layoutTypes.ts";
 
 export type CompositionIntent = WallpaperLayout["guidance"]["intent"];
 export type ImageTransition =
