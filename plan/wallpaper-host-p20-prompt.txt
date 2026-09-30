@@ -1,0 +1,469 @@
+```text
+你现在是 Windows 真机实现代理。Octos ground-truth 已经 PASS，现在开始实现正式的原生壁纸宿主 P2.0。
+
+目标：
+
+新增独立的：
+
+apps/wallpaper-host/
+
+技术栈：
+
+- Rust
+- tao：原生窗口与事件循环
+- wry：WebView2
+- windows-rs：Win32 桌面层探测与窗口操作
+
+核心原则：
+
+错误路线：
+创建顶层浏览器窗口 → 浏览器开始合成 → 事后 SetParent
+
+正确路线：
+探测桌面结构 → 创建时就指定正确父 HWND → 在原生窗口内创建 WebView2
+
+项目状态：
+
+- 分支：desktop/dynamic-layer-v1
+- 基线提交：64e30ac
+- Octos 验证已经 PASS
+- Windows：Windows 11 22H2 Build 22621
+- 机器桌面结构是 collapsed-desktop 变体：
+  - Progman 为空
+  - SHELLDLL_DefView 位于一个全屏顶层 WorkerW
+  - 另一个 WorkerW 只有约 22×22，不是壁纸目标
+- Electron reparent 路线已经永久止损，不要继续修改 Electron 嵌入逻辑。
+
+开始前阅读：
+
+- plan/p1.9-electron-final-verdict.md
+- apps/desktop/octos/README.md
+- apps/desktop/src/main/win32/user32.ts
+- apps/desktop/src/shared/wallpaper-api.ts
+- apps/desktop/src/renderer/src/wallpaper-host.ts
+
+一、清理并同步工作区
+
+执行：
+
+git status --short --branch
+git diff -- pnpm-lock.yaml
+
+当前 Windows 可能只有 pnpm install 产生的 pnpm-lock.yaml 本地噪音。
+
+仅当确认 pnpm-lock.yaml 没有人工改动、只是安装产生的格式或解析噪音时，允许执行：
+
+git restore pnpm-lock.yaml
+
+禁止 reset --hard，禁止覆盖其他本地改动。
+
+然后：
+
+git checkout desktop/dynamic-layer-v1
+git pull origin desktop/dynamic-layer-v1
+git log -1 --oneline
+
+确认 HEAD 至少包含 64e30ac。
+
+二、先创建 P2.0 最小宿主
+
+新增建议结构：
+
+apps/wallpaper-host/
+├── Cargo.toml
+├── Cargo.lock
+├── README.md
+└── src/
+    ├── main.rs
+    ├── desktop.rs
+    ├── renderer.rs
+    └── guardian.rs
+
+不要创建完整 Tauri 项目，不要加入 Tauri command/plugin 系统。
+
+依赖尽量精简：
+
+- tao
+- wry
+- windows
+- anyhow 或 thiserror
+- mime_guess
+- url
+- clap（仅在确有必要时）
+
+选择当前互相兼容的稳定版本，并提交 Cargo.lock。
+
+三、桌面拓扑探测
+
+用 windows-rs 实现：
+
+1. 查找 Progman。
+2. 读取 Progman GWL_EXSTYLE。
+3. 检查 WS_EX_NOREDIRECTIONBITMAP。
+4. 发送：
+
+SendMessageTimeout(
+  Progman,
+  0x052C,
+  0xD,
+  0x1,
+  SMTO_NORMAL,
+  1000
+)
+
+只在初始化或 Explorer 恢复时发送，不要每个 guardian tick 都发送。
+
+5. 枚举顶层窗口。
+6. 找到 SHELLDLL_DefView 及其宿主。
+7. 枚举 WorkerW，记录：
+   - HWND
+   - class
+   - parent
+   - visible
+   - rect
+   - area
+   - 是否包含 DefView
+
+输出结构化诊断日志。
+
+定义类似：
+
+enum DesktopVariant {
+    Classic,
+    Raised,
+    Collapsed,
+}
+
+struct DesktopTarget {
+    variant: DesktopVariant,
+    parent: HWND,
+    insert_after: Option<HWND>,
+    def_view: HWND,
+    worker_w: Option<HWND>,
+}
+
+选择规则：
+
+Raised：
+
+- Progman 有 WS_EX_NOREDIRECTIONBITMAP。
+- parent = Progman。
+- insert_after = SHELLDLL_DefView。
+- 壁纸窗口位于 DefView 下、系统 WorkerW 上。
+
+Classic：
+
+- DefView 宿主存在有效的全屏 WorkerW 兄弟。
+- parent = 真正的全屏 wallpaper WorkerW。
+- 不要选择 22×22 等系统内部 WorkerW。
+- 使用可见性、矩形面积和虚拟屏幕覆盖率校验候选。
+
+Collapsed：
+
+- 没有有效的全屏独立 wallpaper WorkerW。
+- DefView 位于全屏 WorkerW 宿主内。
+- parent = DefView 的 WorkerW 宿主。
+- insert_after = DefView。
+- 这台测试机应该命中这个分支。
+
+不要再采用“随便取第一个可见 WorkerW”的策略。
+
+四、原生窗口必须在创建时进入正确层级
+
+使用 tao 的 Windows 扩展，在创建 Window 时指定 parent HWND：
+
+- with_parent_window(...)
+- with_no_redirection_bitmap(false)
+- 无边框
+- 不可调整大小
+- 不进入任务栏
+- 不激活
+- 初始大小覆盖目标显示器
+
+创建后验证并记录：
+
+- HWND
+- GWL_STYLE
+- GWL_EXSTYLE
+- GetAncestor(GA_PARENT)
+- rect
+- class
+- WS_CHILD
+- WS_EX_NOREDIRECTIONBITMAP
+
+要求宿主窗口：
+
+- WS_CHILD = TRUE
+- WS_EX_NOREDIRECTIONBITMAP = FALSE
+- WS_EX_NOACTIVATE
+- WS_EX_TOOLWINDOW
+- 展示型壁纸默认不接收鼠标
+
+Raised/Collapsed 分支按需要添加：
+
+- WS_EX_LAYERED
+- SetLayeredWindowAttributes(alpha=255)
+- SetWindowPos(host, defView, ...)
+- SWP_NOACTIVATE
+- SWP_FRAMECHANGED（仅样式改变后调用一次）
+
+不要先创建顶层窗口再 SetParent。
+
+五、创建 WebView2
+
+只有原生宿主窗口成功进入桌面层级之后，才创建 wry WebView。
+
+使用：
+
+WebViewBuilder::new()
+  ...
+  .build_as_child(&window)
+
+保持 GPU 加速开启。
+
+renderer 来源通过命令行传入：
+
+cargo run --manifest-path apps/wallpaper-host/Cargo.toml -- \
+  --renderer apps/desktop/out/renderer
+
+运行前构建：
+
+pnpm --filter @wallpaper/desktop build
+
+不要复制 renderer 源码，也不要创建第二套 React 应用。
+
+静态资源必须通过安全的 wry custom protocol 或等价的本地虚拟 host 加载：
+
+- 支持 index.html
+- 支持 assets/*.js 和 assets/*.css
+- 正确 MIME type
+- 拒绝 `..` 路径穿越
+- 只允许读取传入 renderer 根目录内的文件
+- 不要绑定 0.0.0.0
+- 不要关闭 CSP
+- 不要使用远程 CDN
+
+页面诊断应显示：
+
+platform: webview2
+embedded: true
+template: triptych_desktop_equal
+
+六、默认关闭鼠标交互
+
+Octos 的鼠标拦截是其交互式壁纸功能，不要复制。
+
+正式宿主默认是展示型壁纸：
+
+- 不安装全局鼠标 hook。
+- 不把鼠标事件转发给 WebView2。
+- host 使用 WS_EX_TRANSPARENT。
+- host 使用 WS_EX_NOACTIVATE。
+- 必要时对 WebView2 子 HWND 追加透明命中策略。
+- 必要时处理 WM_NCHITTEST / HTTRANSPARENT。
+- 禁止因为点击壁纸让宿主或 WebView2 获取焦点。
+
+验收重点不是“桌面空白区域能否点击”，而是：
+
+- 桌面图标可点击
+- 图标可框选
+- 右键桌面正常
+- Win+D 正常
+- 壁纸不抢焦点
+
+如果 WS_EX_TRANSPARENT 与 WebView2 子窗口组合不足，必须基于 Spy++/Win32 状态定位具体拦截事件的 HWND，不能靠猜测反复叠 flag。
+
+七、Guardian 与 Explorer 恢复
+
+基础显示 PASS 后，在同一阶段加入最小 guardian：
+
+- 250ms 或 500ms 检查一次。
+- 健康路径必须完全 no-op。
+- 不要健康时重复 SetWindowPos。
+- 不要健康时重复发送 0x052C。
+- 使用 IsWindow、GetAncestor、GetClassName、rect 检查。
+- Explorer 重启导致 parent/host 失效时：
+  1. 重新探测桌面结构。
+  2. 丢弃旧 WebView。
+  3. 丢弃旧 tao Window。
+  4. 在 UI 线程重新创建原生窗口。
+  5. 再创建 WebView2。
+- 不要尝试把旧 WebView2 surface reparent 到新父窗口。
+- 日志记录恢复开始、目标变体、旧/新 HWND、恢复耗时。
+
+八、构建与运行
+
+至少执行：
+
+pnpm --filter @wallpaper/desktop typecheck
+pnpm --filter @wallpaper/core test
+pnpm --filter @wallpaper/desktop build
+
+cargo fmt --manifest-path apps/wallpaper-host/Cargo.toml --check
+cargo check --manifest-path apps/wallpaper-host/Cargo.toml
+cargo build --manifest-path apps/wallpaper-host/Cargo.toml
+
+运行：
+
+cargo run --manifest-path apps/wallpaper-host/Cargo.toml -- \
+  --renderer apps/desktop/out/renderer
+
+如果 PowerShell 参数续行不同，自行调整，但不要更改行为。
+
+九、真机验收
+
+必须验证：
+
+1. 蓝/绿/灰三联画显示。
+2. 位于桌面图标下方。
+3. 右上角：
+   - platform: webview2
+   - embedded: true
+   - template: triptych_desktop_equal
+4. 桌面图标可点击和框选。
+5. 右键桌面正常。
+6. 壁纸不抢焦点。
+7. Alt+Tab 和任务栏没有宿主窗口。
+8. 运行 5 分钟无灰屏、白屏、闪退和明显泄漏。
+9. Win+D 正常。
+10. 基础验证通过后，允许执行一次：
+
+Stop-Process -Name explorer -Force
+Start-Process explorer.exe
+
+验证宿主自动恢复。
+
+关闭 wallpaper-host 后，桌面必须恢复正常，不能留下孤儿窗口或后台进程。
+
+十、失败处理
+
+如果基础宿主不能显示：
+
+- 保存完整终端输出。
+- 输出宿主 HWND 与父 HWND 状态。
+- 输出 WebView2 初始化 HRESULT/error。
+- 输出最终 URL。
+- 检查静态资源请求和 MIME。
+- 对比 Octos PASS 结果。
+- 不要回退 Electron。
+- 不要换 CEF。
+- 不要开始 IPC、托盘、自动启动或编辑器集成。
+
+如果 guardian 尚未完成但基础宿主 PASS：
+
+- 可以将结论标记为 PARTIAL。
+- 明确基础宿主已通过。
+- guardian 单独留到 P2.1。
+- 不要为了 guardian 失败破坏已通过的最小宿主。
+
+十一、代码和许可证约束
+
+- 可以阅读 Octos（MIT）实现作参考。
+- 如果复制 Octos 的实质代码，必须保留 MIT attribution。
+- Lively 是 GPL-3.0，只能参考行为，禁止复制其源码到本项目。
+- 不添加密钥、token、机器路径或个人信息。
+- 不提交 target/、out/、dist/、日志或截图。
+- 更新 .gitignore 忽略 Rust target 产物。
+
+十二、提交和推送
+
+只有以下条件满足时才提交：
+
+- typecheck 通过
+- 63 项 core tests 通过
+- cargo fmt 通过
+- cargo check/build 通过
+- 原生 WebView2 壁纸基础视觉 PASS
+- 图标交互 PASS
+
+提交前：
+
+git status --short
+git diff --check
+git diff --stat
+
+只 stage 本任务文件。
+
+提交信息：
+
+feat(desktop): add native WebView2 wallpaper host
+
+推送：
+
+git push origin desktop/dynamic-layer-v1
+
+如果基础视觉或图标交互失败，不要提交、不推送，保留现场并报告。
+
+十三、最终汇报格式
+
+## 结论
+
+PASS / PARTIAL / FAIL
+
+## 提交
+
+- commit：
+- push：
+- branch：
+
+## 环境
+
+- Windows：
+- Rust：
+- Cargo：
+- WebView2：
+- 显示器：
+
+## 桌面探测
+
+- variant：
+- Progman：
+- DefView：
+- DefView host：
+- WorkerW candidates：
+- selected parent：
+- insert_after：
+
+## 宿主状态
+
+- HWND：
+- parent：
+- style：
+- exstyle：
+- WS_CHILD：
+- WS_EX_NOREDIRECTIONBITMAP：
+- WebView2 URL：
+
+## 验证
+
+- React renderer：
+- 图标层级：
+- 图标点击：
+- 框选：
+- 右键桌面：
+- Win+D：
+- Alt+Tab：
+- 5 分钟稳定性：
+- Explorer 重启恢复：
+- 关闭后清理：
+
+## 构建检查
+
+- desktop typecheck：
+- core tests：
+- cargo fmt：
+- cargo check：
+- cargo build：
+
+## 改动文件
+
+列出文件及用途。
+
+## 已知问题
+
+没有则写“无”。
+
+## 下一步
+
+只有 P2.0 PASS 后，才建议进入 WallpaperApi IPC、托盘、自动启动和多显示器。
+```

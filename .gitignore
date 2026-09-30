@@ -5,6 +5,9 @@ dist
 .DS_Store
 *.log
 *.tsbuildinfo
+playwright-report/
+test-results/
+.pnpm-store/
 .local/
 .env*
 !.env.example
@@ -23,5 +26,13 @@ __pycache__/
 # Local tool state
 .freebuff/
 
+# Agent tool logs / local state
+.claude/logs/
+.video_agent/
+.zcode/
+
 # Raw mail API dumps (cleaned records are committed, raw fetch artifacts are not)
 plan/_*_raw.json
+
+# Temporary working files (mail watch state, scratch)
+temp/
