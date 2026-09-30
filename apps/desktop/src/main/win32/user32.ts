@@ -106,7 +106,6 @@ const SetWindowPos = user32.func("__stdcall", "SetWindowPos", "int", [
 
 const IsWindow = user32.func("__stdcall", "IsWindow", "int", ["int64"]);
 const IsWindowVisible = user32.func("__stdcall", "IsWindowVisible", "int", ["int64"]);
-const GetParent = user32.func("__stdcall", "GetParent", "int64", ["int64"]);
 // GetAncestor returns the true parent regardless of WS_CHILD/WS_POPUP style,
 // unlike GetParent which returns the *owner* (often 0) for top-level windows.
 // GA_PARENT = 1, GA_ROOT = 2, GA_ROOTOWNER = 3.

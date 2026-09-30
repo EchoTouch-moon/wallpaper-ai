@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, globalShortcut } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, screen } from "electron";
 import { join } from "node:path";
 import {
   resolvePlatformChoice,
@@ -41,7 +41,9 @@ function registerIpc(platform: DesktopPlatform): void {
 }
 
 function createWallpaperWindow(): BrowserWindow {
-  const displays = require("electron").screen.getAllDisplays();
+  // `screen` is only safe to touch after app.whenReady() — this function runs
+  // exclusively from bootstrap() inside whenReady, so the lazy getter resolves.
+  const displays = screen.getAllDisplays();
   const primary = displays[0];
   const width = primary ? primary.bounds.width : 1920;
   const height = primary ? primary.bounds.height : 1080;

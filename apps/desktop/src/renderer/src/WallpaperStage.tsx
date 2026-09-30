@@ -142,6 +142,9 @@ function Slot({ slot, assetUrl }: { slot: TemplateSlot; assetUrl?: string }) {
   return (
     <div style={style} data-slot-id={slot.id} data-role={slot.role}>
       {assetUrl ? (
+        // Electron renderer: assets load via file/custom-protocol URLs, so
+        // next/image (which needs a Next server for optimization) doesn't apply.
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={assetUrl}
           alt=""
