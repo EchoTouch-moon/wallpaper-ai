@@ -290,7 +290,8 @@ export const layoutCandidateSchema = z.object({
   layout: wallpaperLayoutSchema,
 });
 
-export const editorProjectSchema = z
+const buildEditorProjectSchema = () =>
+  z
   .object({
     version: z.literal("1.0"),
     id: z.string().min(1),
@@ -354,3 +355,5 @@ export const editorProjectSchema = z
       });
     });
   });
+
+export const editorProjectSchema = z.lazy(buildEditorProjectSchema);
