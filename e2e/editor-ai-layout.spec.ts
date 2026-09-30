@@ -65,3 +65,33 @@ test("keeps the canvas primary and reveals tools progressively", async ({ page }
   await page.keyboard.press("Escape");
   await expect(page.getByText("安全区域")).not.toBeVisible();
 });
+
+test("adds an uploaded image and completes crop mode with one Escape", async ({
+  page,
+}) => {
+  await page.goto("/editor");
+
+  await page.getByRole("button", { name: "素材" }).click();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "crop.png",
+    mimeType: "image/png",
+    buffer: RED_PIXEL_PNG,
+  });
+  await expect(page.getByText("1 个项目")).toBeVisible();
+  await page.getByTitle("将 crop.png 添加至画布").click();
+
+  await page.getByRole("button", { name: "检查器" }).click();
+  const cropAspect = page.getByLabel("裁剪比例");
+  await expect(cropAspect).toBeEnabled();
+  await cropAspect.selectOption("1:1");
+
+  const cropStatus = page.getByRole("status").filter({ hasText: "裁剪模式" });
+  await expect(cropStatus).toBeVisible();
+  await expect(page.getByRole("button", { name: "完成裁剪" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+
+  await expect(cropStatus).not.toBeVisible();
+  await expect(page.getByRole("heading", { name: "参数面板" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "调整裁剪" })).toBeVisible();
+});
