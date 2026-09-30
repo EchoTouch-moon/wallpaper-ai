@@ -38,6 +38,7 @@ export function OneTouchIntro({
   onComplete,
 }: OneTouchIntroProps) {
   const rootRef = useRef<HTMLElement>(null);
+  const viewportSvgRef = useRef<SVGSVGElement>(null);
   const geometryRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const outlineRef = useRef<SVGPathElement>(null);
@@ -59,6 +60,7 @@ export function OneTouchIntro({
   const isFocusedRef = useRef(false);
   const resumeStableCycleRef = useRef(false);
   const reducedMotionRef = useRef(false);
+  const pendingActivationRef = useRef(false);
   const viewportRef = useRef<Viewport>({ width: 1440, height: 900 });
   const rayMotionsRef = useRef<RayMotion[]>([]);
   const panelMotionsRef = useRef<PanelMotion[]>([]);
@@ -70,6 +72,7 @@ export function OneTouchIntro({
     width: 1440,
     height: 900,
   });
+  const [isControllerReady, setIsControllerReady] = useState(false);
 
   useEffect(() => {
     let frame = 0;
@@ -77,28 +80,50 @@ export function OneTouchIntro({
     const updateViewport = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
+        const rootBounds = rootRef.current?.getBoundingClientRect();
         const nextViewport = {
-          width: window.innerWidth,
-          height: window.innerHeight,
+          width: Math.max(
+            1,
+            rootBounds?.width ?? document.documentElement.clientWidth,
+          ),
+          height: Math.max(
+            1,
+            rootBounds?.height ?? document.documentElement.clientHeight,
+          ),
         };
         viewportRef.current = nextViewport;
-        setViewport(nextViewport);
+        setViewport((current) =>
+          current.width === nextViewport.width &&
+          current.height === nextViewport.height
+            ? current
+            : nextViewport,
+        );
         controllerRef.current?.updateViewport();
       });
     };
 
+    const resizeObserver = new ResizeObserver(updateViewport);
+    if (rootRef.current) {
+      resizeObserver.observe(rootRef.current);
+    }
     updateViewport();
     window.addEventListener("resize", updateViewport, { passive: true });
+    window.visualViewport?.addEventListener("resize", updateViewport, {
+      passive: true,
+    });
 
     return () => {
       cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", updateViewport);
+      window.visualViewport?.removeEventListener("resize", updateViewport);
     };
   }, []);
 
   useGSAP(
     (_context, contextSafe) => {
       const root = rootRef.current;
+      const viewportSvg = viewportSvgRef.current;
       const geometry = geometryRef.current;
       const button = buttonRef.current;
       const outline = outlineRef.current;
@@ -109,6 +134,7 @@ export function OneTouchIntro({
 
       if (
         !root ||
+        !viewportSvg ||
         !geometry ||
         !button ||
         !outline ||
@@ -123,6 +149,7 @@ export function OneTouchIntro({
 
       const elements: OneTouchElements = {
         root,
+        viewportSvg,
         geometry,
         button,
         outline,
@@ -175,8 +202,16 @@ export function OneTouchIntro({
         onRevealStart,
         onComplete,
       });
+      setIsControllerReady(true);
+      if (pendingActivationRef.current) {
+        pendingActivationRef.current = false;
+        window.requestAnimationFrame(() => {
+          controllerRef.current?.activateTouch();
+        });
+      }
 
       return () => {
+        setIsControllerReady(false);
         controllerRef.current?.dispose();
         controllerRef.current = null;
       };
@@ -195,6 +230,14 @@ export function OneTouchIntro({
     if (!isFocusedRef.current) {
       controllerRef.current?.endHover();
     }
+  };
+
+  const handleActivate = () => {
+    if (!controllerRef.current) {
+      pendingActivationRef.current = true;
+      return;
+    }
+    controllerRef.current.activateTouch();
   };
 
   const overlayStyle = {
@@ -222,6 +265,7 @@ export function OneTouchIntro({
       </div>
 
       <svg
+        ref={viewportSvgRef}
         className={styles.viewportSvg}
         viewBox={`0 0 ${viewport.width} ${viewport.height}`}
         preserveAspectRatio="none"
@@ -279,6 +323,7 @@ export function OneTouchIntro({
           ref={buttonRef}
           className={styles.touchButton}
           type="button"
+          disabled={!isControllerReady}
           aria-label="一触开启网站"
           onPointerEnter={handlePointerEnter}
           onPointerLeave={handlePointerLeave}
@@ -290,7 +335,7 @@ export function OneTouchIntro({
             isFocusedRef.current = false;
             controllerRef.current?.endHover();
           }}
-          onClick={() => controllerRef.current?.activateTouch()}
+          onClick={handleActivate}
         >
           <svg
             className={styles.coreSvg}

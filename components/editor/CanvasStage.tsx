@@ -128,8 +128,9 @@ export function CanvasStage() {
       </div>
 
       {cropSession ? (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 border border-gray-200 rounded-full px-4 py-2 bg-white text-black shadow-sm font-medium text-[11px]" role="status">
-          裁剪模式 · 拖拽图片以重新定位 · 按 Esc 键完成
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full border border-white/15 bg-gray-950/90 px-4 py-2 text-white shadow-lg backdrop-blur-md font-medium text-[11px]" role="status">
+          <i className="block h-1.5 w-1.5 rounded-full bg-orange-400 shadow-[0_0_0_3px_rgba(251,146,60,0.18)]" />
+          裁剪模式 · 拖拽图片重新定位 · Esc 完成
         </div>
       ) : null}
 

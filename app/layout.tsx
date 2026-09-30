@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Wallpaper Studio",
-  description: "An editable canvas for intentional photo wallpapers.",
+  title: "one touch — AI Wallpaper Composer",
+  description: "Select photographs, touch once, and compose a cinematic wallpaper.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

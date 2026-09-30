@@ -7,6 +7,7 @@ import { EditorDock, type EditorDockItem } from "@/components/editor/EditorDock"
 import { PropertyPanel } from "@/components/editor/PropertyPanel";
 import { TemplatePreviewBar } from "@/components/editor/TemplatePreviewBar";
 import { Toolbar } from "@/components/editor/Toolbar";
+import { useEditorStore } from "@/store/editorStore";
 
 type DrawerId = "assets" | "layouts" | "inspector";
 
@@ -17,11 +18,12 @@ function toolIcon(children: ReactNode) {
 export function CanvasFirstWorkspace() {
   const [activeDrawer, setActiveDrawer] = useState<DrawerId | null>(null);
   const lastDrawer = useRef<DrawerId | null>(null);
+  const cropSession = useEditorStore((state) => state.cropSession);
   const closeDrawer = () => setActiveDrawer(null);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && activeDrawer) {
+      if (event.key === "Escape" && activeDrawer && !cropSession) {
         event.preventDefault();
         event.stopPropagation();
         closeDrawer();
@@ -29,7 +31,7 @@ export function CanvasFirstWorkspace() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [activeDrawer]);
+  }, [activeDrawer, cropSession]);
 
   useEffect(() => {
     if (activeDrawer) {

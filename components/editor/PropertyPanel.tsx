@@ -290,6 +290,7 @@ export function PropertyPanel({ onClose }: PropertyPanelProps) {
         <section>
           <SectionTitle title="裁剪定位" />
           <select
+            aria-label="裁剪比例"
             className="w-full mb-2 px-3 py-1.5 text-xs border border-gray-200 rounded-lg bg-gray-50 hover:bg-white text-gray-900 focus:outline-none focus:border-black disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 transition-colors cursor-pointer"
             value={selectedObject?.cropAspect ?? "free"}
             disabled={!selectedObject?.assetId || selectedObject.role === "background"}

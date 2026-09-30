@@ -127,6 +127,9 @@ const CROP_ASPECTS: Record<Exclude<CropAspectId, "free">, number> = {
   "9:16": 9 / 16,
 };
 
+const DEFAULT_SELECTION_BORDER = "#62b1ff";
+const CROP_SELECTION_BORDER = "#ff7a1a";
+
 function createObjectId() {
   return `object_${crypto.randomUUID()}`;
 }
@@ -313,7 +316,10 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         lockScalingX: false,
         lockScalingY: false,
         lockRotation: false,
-        borderColor: "#62b1ff",
+        borderColor: DEFAULT_SELECTION_BORDER,
+        borderDashArray: null,
+        borderScaleFactor: 1,
+        padding: 3,
         hoverCursor: "move",
       });
       cropObject.setCoords();
@@ -658,7 +664,7 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
       cornerStyle: "circle",
       cornerColor: "#ffffff",
       cornerStrokeColor: "#168cff",
-      borderColor: "#62b1ff",
+      borderColor: DEFAULT_SELECTION_BORDER,
       transparentCorners: false,
       padding: 3,
     });
@@ -956,7 +962,10 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
         lockScalingX: true,
         lockScalingY: true,
         lockRotation: true,
-        borderColor: "#ff9d47",
+        borderColor: CROP_SELECTION_BORDER,
+        borderDashArray: [10, 6],
+        borderScaleFactor: 2,
+        padding: 1,
         hoverCursor: "grab",
         dirty: true,
       });

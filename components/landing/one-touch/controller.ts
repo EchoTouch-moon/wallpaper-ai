@@ -21,6 +21,7 @@ export type Ref<T> = { current: T };
 
 export type OneTouchElements = {
   root: HTMLElement;
+  viewportSvg: SVGSVGElement;
   geometry: HTMLDivElement;
   button: HTMLButtonElement;
   outline: SVGPathElement;
@@ -92,6 +93,7 @@ export function createOneTouchController({
 }: OneTouchControllerOptions): OneTouchController {
   const {
     root,
+    viewportSvg,
     geometry,
     button,
     outline,
@@ -121,11 +123,20 @@ export function createOneTouchController({
 
   const updateCutPattern = () => {
     const shape = ONE_TOUCH_CONFIG.shapes[refs.shapeIndex.current];
-    const currentViewport = refs.viewport.current;
+    const rootBounds = root.getBoundingClientRect();
+    const currentViewport = {
+      width: Math.max(1, rootBounds.width),
+      height: Math.max(1, rootBounds.height),
+    };
+    refs.viewport.current = currentViewport;
+    viewportSvg.setAttribute(
+      "viewBox",
+      `0 0 ${currentViewport.width} ${currentViewport.height}`,
+    );
     const buttonBounds = button.getBoundingClientRect();
     const center = {
-      x: buttonBounds.left + buttonBounds.width / 2,
-      y: buttonBounds.top + buttonBounds.height / 2,
+      x: buttonBounds.left - rootBounds.left + buttonBounds.width / 2,
+      y: buttonBounds.top - rootBounds.top + buttonBounds.height / 2,
     };
     const centerX = center.x;
     const centerY = center.y;
