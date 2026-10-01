@@ -306,3 +306,184 @@ test("falls back to deterministic refinement when the planning provider fails", 
     /AI refinement unavailable: Vision planning endpoint is down/,
   );
 });
+
+const assetContent = [
+  {
+    assetId: "asset_a",
+    dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+  },
+  {
+    assetId: "asset_c",
+    dataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==",
+  },
+];
+
+const visionGateOnEnvironment = {
+  LLM_API_KEY: "test-key",
+  LLM_MODEL: "test-model",
+  VISION_PLANNING_ENABLED: "true",
+  VISION_MODEL: "vision-model",
+};
+
+function modelPlanCandidates() {
+  return {
+    candidates: [
+      candidate("model_safe", "safe", "hero-grid", [
+        "hero",
+        "support-1",
+        "support-2",
+      ]),
+      candidate("model_editorial", "editorial", "balanced-mosaic", [
+        "hero",
+        "support-1",
+        "support-2",
+      ]),
+      candidate("model_dynamic", "dynamic", "layered-collage", [
+        "background",
+        "hero",
+        "support-1",
+      ]),
+    ],
+  };
+}
+
+test("degrades from vision planning to text-only planning when the multimodal call fails", async () => {
+  const calls = [];
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3, assetContent },
+    {
+      environment: visionGateOnEnvironment,
+      provider: {
+        async generatePlan(input) {
+          calls.push(input);
+          if (input.assetContent?.length) {
+            throw new Error("vision endpoint exploded");
+          }
+          return modelPlanCandidates();
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "ai");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].assetContent, assetContent);
+  assert.equal(calls[1].assetContent, undefined);
+  assert.deepEqual(response.warnings, [
+    "Vision planning failed; fell back to text-only planning. (vision endpoint exploded)",
+  ]);
+  assert.equal(
+    response.candidates.every((item) => item.usedFallback),
+    false,
+  );
+});
+
+test("keeps a single text-only planning call when the vision gate is off", async () => {
+  const calls = [];
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3, assetContent },
+    {
+      environment: { LLM_API_KEY: "test-key", LLM_MODEL: "test-model" },
+      provider: {
+        async generatePlan(input) {
+          calls.push(input);
+          return modelPlanCandidates();
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "ai");
+  assert.equal(calls.length, 1);
+  // The request contract still carries assetContent; the provider gate (off)
+  // is what keeps the message assembly text-only.
+  assert.deepEqual(calls[0].assetContent, assetContent);
+  assert.deepEqual(response.warnings, []);
+});
+
+test("falls back to deterministic recipes when vision and text-only planning both fail", async () => {
+  const calls = [];
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3, assetContent },
+    {
+      environment: visionGateOnEnvironment,
+      provider: {
+        async generatePlan(input) {
+          calls.push(input);
+          throw new Error("planning endpoint is down");
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "recipe-fallback");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].assetContent, assetContent);
+  assert.equal(calls[1].assetContent, undefined);
+  assert.equal(response.candidates.length, 3);
+  assert.equal(
+    response.candidates.every((item) => item.usedFallback),
+    true,
+  );
+  assert.deepEqual(response.warnings, [
+    "Vision planning failed; fell back to text-only planning. (planning endpoint is down)",
+    "AI planner unavailable: planning endpoint is down",
+  ]);
+});
+
+test("degrades the refinement path from vision planning to text-only planning", async () => {
+  const current = generateCompositionCandidates({
+    brief,
+    assets,
+    candidateCount: 3,
+  }).candidates[0];
+  const calls = [];
+  const response = await refineCompositionCandidateAsync(
+    {
+      brief,
+      assets,
+      currentLayout: current.layout,
+      instruction: "Make the layout more layered and move the hero right.",
+      locked: {
+        target: true,
+        heroAsset: true,
+        safeAreas: true,
+      },
+      assetContent,
+    },
+    {
+      environment: visionGateOnEnvironment,
+      provider: {
+        async generatePlan(input) {
+          calls.push(input);
+          if (input.assetContent?.length) {
+            throw new Error("vision endpoint exploded");
+          }
+          return {
+            candidates: [
+              candidate(
+                "model_refinement",
+                "dynamic",
+                "layered-collage",
+                ["background", "hero", "support-1"],
+              ),
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "ai");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].assetContent, assetContent);
+  assert.equal(calls[1].assetContent, undefined);
+  assert.deepEqual(response.warnings, [
+    "Vision planning failed; fell back to text-only planning. (vision endpoint exploded)",
+  ]);
+  assert.equal(
+    response.candidate.layout.items.find((item) => item.role === "hero")
+      .assetId,
+    "asset_b",
+  );
+});

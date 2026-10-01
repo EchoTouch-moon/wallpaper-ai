@@ -152,12 +152,14 @@ export type PlanningRequest = z.infer<typeof planningRequestV2Schema>;
 export function buildGeneratePlanningRequest(
   brief: CompositionBrief,
   assets: ImageAssetAnalysis[],
+  assetContent?: AssetContentReference[],
 ): PlanningRequest {
   return planningRequestV2Schema.parse({
     version: "2.0",
     operation: "generate",
     brief,
     assets,
+    ...(assetContent && assetContent.length > 0 ? { assetContent } : {}),
   });
 }
 
@@ -166,6 +168,7 @@ export function buildRefinePlanningRequest(
   assets: ImageAssetAnalysis[],
   refineInstruction: string,
   previousCandidates: WallpaperLayout[],
+  assetContent?: AssetContentReference[],
 ): PlanningRequest {
   return planningRequestV2Schema.parse({
     version: "2.0",
@@ -174,5 +177,6 @@ export function buildRefinePlanningRequest(
     assets,
     refineInstruction,
     previousCandidates,
+    ...(assetContent && assetContent.length > 0 ? { assetContent } : {}),
   });
 }

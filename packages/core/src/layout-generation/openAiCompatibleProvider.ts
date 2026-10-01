@@ -6,9 +6,15 @@ import {
   AI_LAYOUT_PLAN_JSON_SCHEMA,
   createLayoutPlanMessages,
   createPlanningRequestMessages,
+  createPlanningRequestContentParts,
+  VISION_PLANNING_SYSTEM_ADDENDUM,
+  type PlanningContentPart,
 } from "./layoutPlanPrompt.ts";
 import { planningRequestV2Schema } from "./planningProtocol.ts";
-import type { LayoutModelConfig } from "./llmConfig.ts";
+import type {
+  LayoutModelConfig,
+  VisionPlanningModelConfig,
+} from "./llmConfig.ts";
 import type { PlanningRequest } from "./planningProtocol.ts";
 import type {
   LayoutModelProvider,
@@ -100,6 +106,7 @@ export class OpenAICompatibleLayoutProvider
   implements LayoutModelProvider, LegacyLayoutModelProvider
 {
   private readonly client: OpenAI;
+  private readonly visionClient: OpenAI | null;
   private readonly config: LayoutModelConfig;
 
   constructor(config: LayoutModelConfig, client?: OpenAI) {
@@ -112,10 +119,39 @@ export class OpenAICompatibleLayoutProvider
         timeout: config.timeoutMs,
         maxRetries: 0,
       });
+    // Multimodal planning calls target the VISION_* model identity when one
+    // is configured. An injected client (tests) is shared for both calls.
+    this.visionClient = client
+      ? null
+      : config.visionPlanning
+        ? new OpenAI({
+            apiKey: config.visionPlanning.apiKey,
+            baseURL: config.visionPlanning.baseURL,
+            timeout: config.visionPlanning.timeoutMs,
+            maxRetries: 0,
+          })
+        : null;
   }
 
   async generatePlan(planning: PlanningRequest) {
     const parsed = planningRequestV2Schema.parse(planning);
+    // Multimodal tier (plan/multimodal-planning-protocol-design.md §2.1/§2.4):
+    // only when the VISION_PLANNING_ENABLED configuration resolved AND the
+    // request carries asset content. Gate off, missing key, or empty
+    // assetContent all keep the existing text-only message shape.
+    const visionPlanning =
+      this.config.visionPlanning && (parsed.assetContent?.length ?? 0) > 0
+        ? this.config.visionPlanning
+        : null;
+    if (visionPlanning) {
+      return this.requestPlan(
+        {
+          system: `${createPlanningRequestMessages(parsed).system} ${VISION_PLANNING_SYSTEM_ADDENDUM}`,
+          user: createPlanningRequestContentParts(parsed),
+        },
+        visionPlanning,
+      );
+    }
     return this.requestPlan(createPlanningRequestMessages(parsed));
   }
 
@@ -123,10 +159,13 @@ export class OpenAICompatibleLayoutProvider
     return this.requestPlan(createLayoutPlanMessages(input));
   }
 
-  private async requestPlan(messages: {
-    system: string;
-    user: string;
-  }) {
+  private async requestPlan(
+    messages: {
+      system: string;
+      user: string | PlanningContentPart[];
+    },
+    visionPlanning?: VisionPlanningModelConfig | null,
+  ) {
     const responseFormat =
       this.config.responseFormat === "json_schema"
         ? {
@@ -141,9 +180,12 @@ export class OpenAICompatibleLayoutProvider
           ? { type: "json_object" as const }
           : undefined;
 
+    const client = visionPlanning
+      ? (this.visionClient ?? this.client)
+      : this.client;
     try {
-      const completion = await this.client.chat.completions.create({
-        model: this.config.model,
+      const completion = await client.chat.completions.create({
+        model: visionPlanning?.model ?? this.config.model,
         messages: [
           { role: "system", content: messages.system },
           { role: "user", content: messages.user },

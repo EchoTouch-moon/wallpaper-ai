@@ -6,12 +6,16 @@ import {
   wallpaperLayoutSchema,
 } from "../layout/layoutSchema.ts";
 import { compositionBriefSchema } from "./compositionBrief.ts";
+import { assetContentReferenceSchema } from "./planningProtocol.ts";
 
 export const compositionGenerationRequestSchema = z
   .object({
     brief: compositionBriefSchema,
     assets: z.array(imageAssetAnalysisSchema).min(2).max(6),
     candidateCount: z.literal(3).default(3),
+    // Optional inline image references for the multimodal planning stage
+    // (protocol v2 §2.1). Absent by default: zero-config stays text-only.
+    assetContent: z.array(assetContentReferenceSchema).max(6).optional(),
   })
   .strict()
   .superRefine((request, context) => {
@@ -58,6 +62,7 @@ export const compositionRefineRequestSchema = z
         safeAreas: z.boolean().default(true),
       })
       .strict(),
+    assetContent: z.array(assetContentReferenceSchema).max(6).optional(),
   })
   .strict()
   .superRefine((request, context) => {

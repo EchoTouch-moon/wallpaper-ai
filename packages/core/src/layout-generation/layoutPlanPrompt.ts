@@ -109,6 +109,58 @@ export const AI_LAYOUT_PLAN_JSON_SCHEMA = {
                     type: "string",
                     enum: ["avoid", "soft-avoid"],
                   },
+                  slotIntents: {
+                    type: "object",
+                    additionalProperties: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        cropIntent: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            focus: {
+                              anyOf: [
+                                {
+                                  type: "string",
+                                  enum: ["subject", "saliency", "center"],
+                                },
+                                {
+                                  type: "object",
+                                  additionalProperties: false,
+                                  required: ["x", "y"],
+                                  properties: {
+                                    x: {
+                                      type: "number",
+                                      minimum: 0,
+                                      maximum: 1,
+                                    },
+                                    y: {
+                                      type: "number",
+                                      minimum: 0,
+                                      maximum: 1,
+                                    },
+                                  },
+                                },
+                              ],
+                            },
+                            zoom: {
+                              type: "string",
+                              enum: ["tight", "standard", "loose"],
+                            },
+                          },
+                        },
+                        visualWeight: {
+                          type: "string",
+                          enum: ["dominant", "balanced", "subtle"],
+                        },
+                      },
+                    },
+                  },
+                  layering: {
+                    type: "string",
+                    enum: ["none", "slight", "strong"],
+                  },
                 },
               },
               { type: "null" },
@@ -237,6 +289,16 @@ const ASSET_ANALYSIS_RULES = [
   "Prefer assets with high resolution, high contrast, and hero-appropriate content in the hero slot, and arrange adjacent assets so their dominant colors stay harmonious.",
 ] as const;
 
+// Semantic control knobs (multimodal planning protocol v2 §2.2). They stay
+// optional: an omitted field always compiles to the deterministic default.
+const SLOT_INTENT_PLANNING_RULES = [
+  "slotIntents and layering are optional semantic knobs; omit both whenever uncertain so the deterministic compiler defaults apply.",
+  "Use slotIntents only to describe per-slot crop intent and visual weight: cropIntent.focus accepts subject, saliency, center, or a normalized 0-1 point, cropIntent.zoom accepts tight, standard, or loose, and visualWeight accepts dominant, balanced, or subtle.",
+  "Use cropIntent focus subject or saliency only when that asset's analysis provides subjectBox or saliencyCenter; otherwise prefer center or omit the field.",
+  "Keys of slotIntents must be slot IDs used in the same candidate's assignments; intents for slots the recipe does not produce are ignored.",
+  "Use layering only when the profile or boundary actually stacks content: none keeps tiles separate, slight adds subtle depth overlap, and strong adds pronounced stacking.",
+] as const;
+
 const REFINE_PLANNING_RULES = [
   "For refine operations, treat previousCandidates as the layouts to improve: keep what already works, apply the refineInstruction as a localized change, and keep the brief constraints unchanged.",
 ] as const;
@@ -285,6 +347,7 @@ export function createPlanningRequestMessages(planning: PlanningRequest) {
       candidateCountRule(candidateCount),
       ...BRIEF_PLANNING_RULES,
       ...ASSET_ANALYSIS_RULES,
+      ...SLOT_INTENT_PLANNING_RULES,
       ...(operation === "refine" ? REFINE_PLANNING_RULES : []),
     ].join(" "),
     user: JSON.stringify({
@@ -304,3 +367,51 @@ export function createPlanningRequestMessages(planning: PlanningRequest) {
     }),
   };
 }
+
+/**
+ * OpenAI-compatible multimodal content parts (plan/multimodal-planning-
+ * protocol-design.md §2.1): one annotated image_url part per assetContent
+ * entry, followed by the authoritative text planning payload. Data URLs stay
+ * in memory only — they are assembled here per call and never persisted or
+ * logged.
+ */
+export type PlanningContentPart =
+  | { type: "text"; text: string }
+  | {
+      type: "image_url";
+      image_url: { url: string; detail: "auto" };
+    };
+
+export function createPlanningRequestContentParts(
+  planning: PlanningRequest,
+): PlanningContentPart[] {
+  const assetContent = planning.assetContent ?? [];
+  if (assetContent.length === 0) {
+    throw new Error(
+      "Multimodal planning content requires at least one assetContent reference",
+    );
+  }
+  const parts: PlanningContentPart[] = [];
+  assetContent.forEach((content, index) => {
+    parts.push({
+      type: "text",
+      text: `Asset ${index + 1} of ${assetContent.length}; assetId: ${content.assetId}`,
+    });
+    parts.push({
+      type: "image_url",
+      image_url: { url: content.dataUrl, detail: "auto" },
+    });
+  });
+  parts.push({
+    type: "text",
+    text: createPlanningRequestMessages(planning).user,
+  });
+  return parts;
+}
+
+/**
+ * System addendum appended only when the request actually travels as
+ * multimodal content, so the model knows how to read the image parts.
+ */
+export const VISION_PLANNING_SYSTEM_ADDENDUM =
+  "When the user message carries image parts, each image is preceded by a text label with its assetId, and the final text part is the authoritative JSON planning payload; ground cropIntent and slot choices in those images.";

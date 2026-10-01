@@ -8,8 +8,14 @@ import {
   AI_LAYOUT_PLAN_JSON_SCHEMA,
   createLayoutPlanMessages,
   createPlanningRequestMessages,
+  createPlanningRequestContentParts,
 } from "./layoutPlanPrompt.ts";
-import { buildGeneratePlanningRequest, buildRefinePlanningRequest } from "./planningProtocol.ts";
+import {
+  buildGeneratePlanningRequest,
+  buildRefinePlanningRequest,
+  assetContentReferenceSchema,
+} from "./planningProtocol.ts";
+import { templateRecipeSchema } from "../layout/templateRecipe.ts";
 
 function analysis(assetId, color) {
   return {
@@ -304,4 +310,131 @@ test("the legacy refine prompt still sends the current layout", () => {
 
   assert.deepEqual(payload.currentLayout, jsonClone(layout));
   assert.equal(messages.system.includes("Return exactly 1 candidate."), true);
+});
+
+test("the v2 output schema exposes the semantic knobs exactly as templateRecipeSchema accepts them", () => {
+  const recipeSchema = AI_LAYOUT_PLAN_JSON_SCHEMA.properties.candidates.items
+    .properties.recipe.anyOf[0];
+  const slotIntents = recipeSchema.properties.slotIntents;
+  const slotIntent = slotIntents.additionalProperties;
+  const cropIntent = slotIntent.properties.cropIntent;
+
+  // The prompt schema and the validator stay in sync on every knob.
+  assert.equal(slotIntents.type, "object");
+  assert.deepEqual(slotIntent.properties.visualWeight.enum, [
+    "dominant",
+    "balanced",
+    "subtle",
+  ]);
+  assert.deepEqual(cropIntent.properties.zoom.enum, [
+    "tight",
+    "standard",
+    "loose",
+  ]);
+  assert.deepEqual(cropIntent.properties.focus.anyOf[0].enum, [
+    "subject",
+    "saliency",
+    "center",
+  ]);
+  assert.deepEqual(cropIntent.properties.focus.anyOf[1].required, ["x", "y"]);
+  assert.deepEqual(recipeSchema.properties.layering.enum, [
+    "none",
+    "slight",
+    "strong",
+  ]);
+
+  // The zod validator accepts a recipe the prompt schema advertises.
+  const recipe = templateRecipeSchema.parse({
+    version: "1.0",
+    profile: "dynamic",
+    family: "layered-collage",
+    heroPosition: "center",
+    heroShare: 0.62,
+    supportCount: 2,
+    margin: 0.02,
+    gap: 0.01,
+    cornerRadius: 0.018,
+    rhythm: "layered",
+    boundary: "overlap",
+    safeAreaPolicy: "soft-avoid",
+    slotIntents: {
+      hero: { cropIntent: { focus: "saliency", zoom: "tight" }, visualWeight: "dominant" },
+      "support-1": { visualWeight: "subtle" },
+    },
+    layering: "slight",
+  });
+  assert.equal(recipe.slotIntents.hero.cropIntent.focus, "saliency");
+  assert.equal(recipe.layering, "slight");
+});
+
+test("the v2 system rules explain how to use the semantic knobs conservatively", () => {
+  const messages = createPlanningRequestMessages(
+    buildGeneratePlanningRequest(brief, assets),
+  );
+
+  for (const fragment of [
+    "omit both whenever uncertain",
+    "cropIntent.focus accepts subject, saliency, center",
+    "subjectBox or saliencyCenter",
+    "Keys of slotIntents must be slot IDs",
+    "layering only when the profile or boundary actually stacks content",
+  ]) {
+    assert.ok(
+      messages.system.includes(fragment),
+      `the v2 system rules must explain "${fragment}"`,
+    );
+  }
+
+  // The frozen legacy prompt stays free of the new knobs.
+  const legacy = createLayoutPlanMessages({
+    operation: "generate",
+    request: {
+      operation: "generate",
+      canvas: { width: 1920, height: 1080, ratioId: "16:9" },
+      intent: { mode: "ai", style: "auto", count: 1 },
+      assets,
+      options: { candidateCount: 1, allowFallback: true },
+    },
+  });
+  assert.equal(legacy.system.includes("slotIntents"), false);
+  assert.equal(legacy.system.includes("layering"), false);
+});
+
+test("multimodal content parts annotate every asset image and keep the payload last", () => {
+  const assetContent = [
+    { assetId: "asset_a", dataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+    { assetId: "asset_c", dataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRg==" },
+  ];
+  const planning = {
+    ...buildGeneratePlanningRequest(brief, assets),
+    assetContent,
+  };
+  const parts = createPlanningRequestContentParts(planning);
+
+  assert.equal(parts.length, 2 * assetContent.length + 1);
+  assert.deepEqual(
+    parts
+      .filter((part) => part.type === "image_url")
+      .map((part) => part.image_url.url),
+    assetContent.map((asset) => asset.dataUrl),
+  );
+  assert.equal(
+    parts.filter((part) => part.type === "text" && part.text.includes("assetId:")).length,
+    2,
+  );
+  const payload = parts.at(-1);
+  assert.equal(payload.type, "text");
+  assert.deepEqual(JSON.parse(payload.text).version, "2.0");
+
+  // Empty asset content must never assemble a multimodal message.
+  assert.throws(
+    () =>
+      createPlanningRequestContentParts(buildGeneratePlanningRequest(brief, assets)),
+    /assetContent/,
+  );
+
+  // The assetContent entries still round-trip through the reference schema.
+  assetContent.forEach((entry) =>
+    assert.deepEqual(assetContentReferenceSchema.parse(entry), entry),
+  );
 });
