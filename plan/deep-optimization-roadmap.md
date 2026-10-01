@@ -30,6 +30,8 @@
 
 ## 方向 B：LangGraph 实验线收敛（需要产品决策，勿单方面执行）
 
+> 2026-10-01 更新：**本决策已被"协议优先"策略消解**——协议 v2 成为唯一稳定接缝后，LangGraph 降级为可替换适配器（见 [multimodal-planning-protocol-design.md](./multimodal-planning-protocol-design.md) §2.5）。留（当备胎适配器）或冻结都不再影响架构，无需专项拍板；唯一要求是它若复活必须实现 `LayoutModelProvider` v2 接口而不是旁路。
+
 **现状**：`services/layout-orchestrator`（LangGraph + postgres checkpoint + `/api/layout-sessions/[sessionId]/approve` 审批流）完整存在、有 7 个测试文件，但 OneTouch 主产品不经过它；`LAYOUT_ENGINE=legacy` 为默认。`store/editorStore` 等 Editor 设施仍在活跃使用（7 个组件引用），不是死代码。
 
 **选项**

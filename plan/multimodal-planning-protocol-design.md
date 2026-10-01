@@ -55,11 +55,33 @@ layering: "none" | "slight" | "strong";
 
 零配置时上传与生成行为与今天完全一致。
 
-### 2.5 契约范围与 LangGraph 解耦
+### 2.5 引擎无关：协议是唯一稳定接缝（ports & adapters）
 
-v2 只上 OneTouch 线；旧 `LayoutGenerationRequest` 原样冻结为 LangGraph 兼容面。这样路线图方向 B（LangGraph 留/冻结/深化）的决策不阻塞 v2，反之亦然。跨语言 parity 测试继续守护冻结面。
+协议 v2 被明确为产品级的**稳定契约**——schema 化、带版本号、用 JSON fixture 做跨实现一致性测试。所有执行引擎降级为协议背后的**可替换适配器**：
 
-### 2.6 质量对照（先行）
+| 适配器 | 状态 | 说明 |
+| --- | --- | --- |
+| OpenAI-compatible 直连 | ✅ 现有 | `OpenAICompatibleLayoutProvider`，v2 升级为多模态 |
+| 确定性 fallback | ✅ 现有 | 零配置兜底，永在 |
+| **精简 agent 循环** | 🆕 新增（v2 后） | 见 2.7——无需任何框架，协议约束使其安全 |
+| LangGraph（Python） | ⬇️ 降级 | 从"另一条通路"降级为可选适配器或直接冻结；**路线图方向 B 的产品决策就此消解**：留不留 LangGraph 不再影响架构，冻结成本≈0 |
+
+代码侧的统一动作：`LayoutModelProvider` 接口升级为 v2 协议的唯一入口（`generatePlan(planningRequest) → aiPlanResponse`），LangGraph 线如果保留也要实现这个接口而不是旁路。
+
+### 2.6 精简 agent 循环（协议之后的自然延伸）
+
+协议约束 + 现有的确定性编译器/校验器，正好构成一个无框架 agent 循环的全部要件：
+
+```
+有界循环（≤N 轮）:
+  1. 模型看图（多模态输入）→ 提出 recipe 候选
+  2. 确定性编译器 + validateLayout 验证候选        ← 复用现有设施
+  3. 全过 → 返回；有败 → 把结构化错误喂回模型自修    ← 复用现有逐候选修复逻辑
+```
+
+价值：单次调用里模型修不好的候选，能在循环里自我纠正（现状是直接落 fallback）；成本：一个小循环体，无框架依赖。这就是"精简 agent"的形态——**协议把行为约束住了，agent 只需要专注推理**。
+
+### 2.7 质量对照（先行）
 
 按路线图方向 F 先建小评估集：10 个典型 brief × 各 3 候选，启发式评分（槽位焦点保真度、跨图色彩和谐、safe-area 遵守）+ 人工抽检。v2 上线前后跑同集对比，防"看得见反而编得差"。
 
