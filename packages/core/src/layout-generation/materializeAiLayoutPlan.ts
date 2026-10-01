@@ -27,6 +27,16 @@ function materializeCandidate(
         width: request.canvas.width,
         height: request.canvas.height,
         assetCount: request.assets.length,
+        // Pass the plan's slot bindings so the compiler (not the model) can
+        // resolve recipe slotIntents — crop focus/zoom — against the bound
+        // assets' analyses. Absent intents compile exactly as before.
+        assets: request.assets,
+        slotAssignments: Object.fromEntries(
+          plan.assignments.map((assignment) => [
+            assignment.slotId,
+            assignment.assetId,
+          ]),
+        ),
       })
     : getTemplate(
         plan.templateId ??
@@ -79,6 +89,16 @@ function materializeCandidate(
     templateRecipe: plan.recipe ?? undefined,
   });
 
+  // Compiler-resolved crops for recipe slotIntents. Present only when the
+  // recipe carried a cropIntent and the slot's bound asset was analyzed;
+  // they were computed for exactly the assignment below, so they slot in
+  // ahead of the generic cover crop.
+  const templateCropBySlot = new Map(
+    template.slots
+      .filter((templateSlot) => templateSlot.crop)
+      .map((templateSlot) => [templateSlot.id, templateSlot.crop]),
+  );
+
   const items = baseCandidate.layout.items.map((item) => {
     const assignment = assignmentBySlot.get(item.slotId ?? "");
     if (!assignment) {
@@ -95,12 +115,14 @@ function materializeCandidate(
           focalPoint: assignment.crop.focalPoint ?? undefined,
         }
       : null;
+    const intentCrop = templateCropBySlot.get(item.slotId ?? "");
 
     return {
       ...item,
       assetId: assignment.assetId,
       crop:
         plannedCrop ??
+        intentCrop ??
         calculateCoverCrop(analysis, item.width, item.height),
     };
   });

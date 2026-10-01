@@ -90,6 +90,10 @@ export const templateTypeSchema = z.enum([
   "stacked-story",
 ]);
 
+export const cropConfigSchema = normalizedBoxSchema.extend({
+  focalPoint: normalizedPointSchema.optional(),
+});
+
 export const templateSlotSchema = z.object({
   id: z.string().min(1),
   x: normalizedNumberSchema,
@@ -103,6 +107,11 @@ export const templateSlotSchema = z.object({
   radius: normalizedNumberSchema.optional(),
   polygon: z.array(normalizedPointSchema).min(3).optional(),
   safeZone: normalizedBoxSchema.optional(),
+  // Compiler-resolved crop for the slot's assigned asset (normalized
+  // asset-space box). Present only when the recipe carried a slot-level
+  // cropIntent AND compilation received asset analyses + slot assignments;
+  // absent otherwise, so downstream cover-crop behavior is unchanged.
+  crop: cropConfigSchema.optional(),
 });
 
 export const wallpaperTemplateSchema = z
@@ -149,10 +158,6 @@ export const wallpaperTemplateSchema = z
       }
     });
   });
-
-export const cropConfigSchema = normalizedBoxSchema.extend({
-  focalPoint: normalizedPointSchema.optional(),
-});
 
 export const maskConfigSchema = z.object({
   type: z.enum(["rect", "rounded-rect", "polygon"]),

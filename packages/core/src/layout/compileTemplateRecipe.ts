@@ -1,8 +1,15 @@
 import { wallpaperTemplateSchema } from "./layoutSchema.ts";
+import { calculateCoverCrop } from "./planTemplate.ts";
 import { templateRecipeSchema } from "./templateRecipe.ts";
 
-import type { TemplateRecipe } from "./templateRecipe.ts";
 import type {
+  CropFocus,
+  CropIntent,
+  TemplateRecipe,
+  VisualWeight,
+} from "./templateRecipe.ts";
+import type {
+  ImageAssetAnalysis,
   TemplateSlot,
   TemplateType,
   WallpaperTemplate,
@@ -15,12 +22,169 @@ type Rect = {
   height: number;
 };
 
+type FocalPoint = { x: number; y: number };
+
+type CoverCrop = Rect & { focalPoint: FocalPoint };
+
 export interface CompileTemplateRecipeInput {
   recipe: TemplateRecipe;
   ratioId: string;
   width: number;
   height: number;
   assetCount: number;
+  /**
+   * Optional asset analyses. Crop-intent focus semantics ("subject" /
+   * "saliency") read subjectBox / saliencyCenter from the analysis of the
+   * asset bound to the slot, so they resolve only when analyses are
+   * provided together with `slotAssignments`.
+   */
+  assets?: ImageAssetAnalysis[];
+  /**
+   * Optional slotId → assetId binding used to resolve per-slot crop
+   * intents. Absent (or unmatched slots) leave the slot without a
+   * compiled crop, preserving the downstream cover-crop default.
+   */
+  slotAssignments?: Record<string, string>;
+}
+
+/**
+ * Semantic → geometric mapping tables (multimodal planning protocol v2 §2.2).
+ * The model emits only these enum/point semantics; every number below lives
+ * in the deterministic compiler.
+ */
+export const CROP_ZOOM_FACTORS = {
+  tight: 0.8,
+  standard: 1,
+  loose: 1.2,
+} as const;
+
+export const VISUAL_WEIGHT_SLOT_SCALE = {
+  dominant: 1.08,
+  balanced: 1,
+  subtle: 0.92,
+} as const;
+
+/**
+ * Overlap offset for the dynamic layered-collage family, in normalized
+ * canvas units along the support→hero axis. Negative values pull support
+ * cards toward the hero (stronger overlap); positive values push them away.
+ */
+export const LAYERING_OVERLAP_OFFSET = {
+  none: 0.06,
+  slight: 0,
+  strong: -0.06,
+} as const;
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function boxCenter(box: Rect): FocalPoint {
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/**
+ * Resolves a semantic crop focus against the bound asset's analysis:
+ * "subject" prefers the detected subject box, "saliency" prefers the
+ * saliency center, "center" is the geometric center, and a custom
+ * normalized point is used directly (clamped defensively into [0, 1]).
+ * Each analysis-driven mode falls back to the other signal, then to the
+ * image center, when the analysis lacks the preferred signal.
+ */
+export function resolveCropFocus(
+  focus: CropFocus,
+  analysis: ImageAssetAnalysis,
+): FocalPoint {
+  if (focus === "center") {
+    return { x: 0.5, y: 0.5 };
+  }
+  if (typeof focus === "object") {
+    return { x: clamp(focus.x, 0, 1), y: clamp(focus.y, 0, 1) };
+  }
+  if (focus === "subject") {
+    if (analysis.subjectBox) {
+      return boxCenter(analysis.subjectBox);
+    }
+    if (analysis.saliencyCenter) {
+      return { ...analysis.saliencyCenter };
+    }
+    return { x: 0.5, y: 0.5 };
+  }
+  if (analysis.saliencyCenter) {
+    return { ...analysis.saliencyCenter };
+  }
+  if (analysis.subjectBox) {
+    return boxCenter(analysis.subjectBox);
+  }
+  return { x: 0.5, y: 0.5 };
+}
+
+/**
+ * Maps a slot-level cropIntent onto crop geometry, starting from the base
+ * cover crop for the slot's aspect ratio:
+ *
+ * - focus  → the crop box is re-centered on the resolved focal point;
+ * - zoom   → the box is scaled by the tier factor (tight 0.8 / standard
+ *   1.0 / loose 1.2) around the focal point;
+ * - both axes are clamped back into the legal unit domain (0 ≤ x,
+ *   x + width ≤ 1), so edge-focused or loosened crops stay valid.
+ *
+ * Returns null when the intent is semantically inert (no focus and a
+ * standard-or-absent zoom), leaving the base cover crop untouched.
+ */
+export function applyCropIntent(
+  coverCrop: CoverCrop,
+  cropIntent: CropIntent,
+  analysis: ImageAssetAnalysis,
+): CoverCrop | null {
+  const focus = cropIntent.focus;
+  if (
+    focus === undefined &&
+    (cropIntent.zoom === undefined || cropIntent.zoom === "standard")
+  ) {
+    return null;
+  }
+
+  const focalPoint =
+    focus !== undefined
+      ? resolveCropFocus(focus, analysis)
+      : { ...coverCrop.focalPoint };
+  const factor = cropIntent.zoom
+    ? CROP_ZOOM_FACTORS[cropIntent.zoom]
+    : 1;
+  const width = Math.min(1, coverCrop.width * factor);
+  const height = Math.min(1, coverCrop.height * factor);
+
+  return {
+    x: clamp(focalPoint.x - width / 2, 0, 1 - width),
+    y: clamp(focalPoint.y - height / 2, 0, 1 - height),
+    width,
+    height,
+    focalPoint,
+  };
+}
+
+/**
+ * Maps a slot-level visualWeight onto a slot scale tier: the rect scales
+ * around its center (dominant +8%, balanced unchanged, subtle −8%), then
+ * is clamped back inside the normalized canvas so the grown slot stays in
+ * the legal domain.
+ */
+export function applyVisualWeight(rect: Rect, weight: VisualWeight): Rect {
+  const factor = VISUAL_WEIGHT_SLOT_SCALE[weight];
+  if (factor === 1) {
+    return rect;
+  }
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  const width = Math.min(1, rect.width * factor);
+  const height = Math.min(1, rect.height * factor);
+  return {
+    x: clamp(centerX - width / 2, 0, 1 - width),
+    y: clamp(centerY - height / 2, 0, 1 - height),
+    width,
+    height,
+  };
 }
 
 function round(value: number) {
@@ -283,17 +447,35 @@ function layeredSlots(
   if (remaining <= 0) {
     return slots;
   }
+  // Recipe-level layering is consumed only by the dynamic recipe family
+  // (the layered-collage overlap structure): negative offsets pull the
+  // support cards toward the hero for stronger overlap, positive offsets
+  // separate them. Profiles other than dynamic ignore the knob.
+  const layeringOffset =
+    recipe.profile === "dynamic" && recipe.layering
+      ? LAYERING_OVERLAP_OFFSET[recipe.layering]
+      : 0;
   const cardWidth = portrait ? content.width * 0.46 : content.width * 0.3;
   const cardHeight = portrait ? content.height * 0.18 : content.height * 0.3;
   for (let index = 0; index < remaining; index += 1) {
     const progress = remaining === 1 ? 0.5 : index / (remaining - 1);
-    const x = portrait
+    const rawX = portrait
       ? content.x +
         (index % 2 === 0 ? 0.04 : content.width - cardWidth - 0.04)
       : content.x + content.width - cardWidth - 0.03;
-    const y = portrait
+    const rawY = portrait
       ? content.y + content.height * (0.58 + progress * 0.18)
       : content.y + content.height * (0.08 + progress * 0.56);
+    const x = clamp(
+      portrait ? rawX : rawX + layeringOffset,
+      content.x,
+      content.x + content.width - cardWidth,
+    );
+    const y = clamp(
+      portrait ? rawY + layeringOffset : rawY,
+      content.y,
+      content.y + content.height - cardHeight,
+    );
     slots.push(
       slot(
         `support-${index + 1}`,
@@ -320,6 +502,101 @@ function typeForRecipe(recipe: TemplateRecipe): TemplateType {
     case "triptych":
       return "triptych";
   }
+}
+
+/**
+ * Rounds a normalized box to the compiler's 5-decimal grid, re-clamping
+ * positions after rounding so `x + width ≤ 1` stays exactly true for the
+ * schema's boundary refinement.
+ */
+function roundBox(rect: Rect): Rect {
+  const width = round(Math.min(1, Math.max(0.01, rect.width)));
+  const height = round(Math.min(1, Math.max(0.01, rect.height)));
+  return {
+    x: round(clamp(rect.x, 0, 1 - width)),
+    y: round(clamp(rect.y, 0, 1 - height)),
+    width,
+    height,
+  };
+}
+
+/**
+ * Applies per-slot semantic intents (visualWeight scale tier, cropIntent
+ * focus/zoom) onto the compiled slots. Requires `assets` + `slotAssignments`
+ * to resolve crop intents against the bound asset's analysis; scale tiers
+ * are pure slot geometry and always applicable. Slots without an intent —
+ * and intents naming slots the recipe does not produce — pass through
+ * untouched.
+ */
+function applySlotIntents(
+  slots: TemplateSlot[],
+  recipe: TemplateRecipe,
+  input: CompileTemplateRecipeInput,
+): TemplateSlot[] {
+  const intents = recipe.slotIntents;
+  if (!intents) {
+    return slots;
+  }
+  const assetById = new Map(
+    (input.assets ?? []).map((analysis) => [analysis.assetId, analysis]),
+  );
+
+  return slots.map((current): TemplateSlot => {
+    const intent = intents[current.id];
+    if (!intent) {
+      return current;
+    }
+
+    let next = current;
+    if (intent.visualWeight && intent.visualWeight !== "balanced") {
+      const scaled = applyVisualWeight(
+        {
+          x: current.x,
+          y: current.y,
+          width: current.width,
+          height: current.height,
+        },
+        intent.visualWeight,
+      );
+      next = {
+        ...next,
+        ...roundBox(scaled),
+      };
+    }
+
+    if (intent.cropIntent) {
+      const assignedAssetId = input.slotAssignments?.[current.id];
+      const analysis = assignedAssetId
+        ? assetById.get(assignedAssetId)
+        : undefined;
+      if (analysis) {
+        const coverCrop = calculateCoverCrop(
+          analysis,
+          next.width * input.width,
+          next.height * input.height,
+        );
+        const cropped = applyCropIntent(
+          coverCrop,
+          intent.cropIntent,
+          analysis,
+        );
+        if (cropped) {
+          next = {
+            ...next,
+            crop: {
+              ...roundBox(cropped),
+              focalPoint: {
+                x: round(clamp(cropped.focalPoint.x, 0, 1)),
+                y: round(clamp(cropped.focalPoint.y, 0, 1)),
+              },
+            },
+          };
+        }
+      }
+    }
+
+    return next;
+  });
 }
 
 export function compileTemplateRecipe(
@@ -352,6 +629,8 @@ export function compileTemplateRecipe(
       slots = layeredSlots(content, count, recipe, portrait);
       break;
   }
+
+  slots = applySlotIntents(slots, recipe, input);
 
   return wallpaperTemplateSchema.parse({
     id: `generated_${recipe.profile}_${recipe.family}_${input.ratioId.replace(/[^a-z0-9]+/gi, "_")}_${count}`,

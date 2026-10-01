@@ -208,3 +208,186 @@ test("rejects normalized crop boxes that leave the source image", () => {
 
   assert.equal(result.success, false);
 });
+
+// ---------------------------------------------------------------------------
+// Semantic control vocabulary passthrough (protocol v2 §2.2): the plan
+// schema embeds templateRecipeSchema, so slot-level cropIntent /
+// visualWeight and recipe-level layering flow through without extra
+// translation — and out-of-vocabulary values are rejected at the boundary.
+// ---------------------------------------------------------------------------
+
+const recipeWithKnobs = {
+  version: "1.0",
+  profile: "dynamic",
+  family: "layered-collage",
+  heroPosition: "center",
+  heroShare: 0.62,
+  supportCount: 2,
+  margin: 0.025,
+  gap: 0.008,
+  cornerRadius: 0.026,
+  rhythm: "layered",
+  boundary: "overlap",
+  safeAreaPolicy: "soft-avoid",
+  slotIntents: {
+    hero: { cropIntent: { focus: "subject", zoom: "tight" }, visualWeight: "dominant" },
+    "support-1": { cropIntent: { focus: { x: 0.25, y: 0.75 }, zoom: "loose" } },
+  },
+  layering: "strong",
+};
+
+function recipePlan(recipe) {
+  return {
+    candidates: [
+      {
+        id: "ai_recipe_knobs",
+        label: "Layered with intent",
+        reason: "Semantic knobs drive focus, weight, and layering.",
+        harmonyScore: 0.9,
+        templateId: null,
+        recipe,
+        assignments: [
+          { slotId: "background", assetId: "asset_a", crop: null },
+          { slotId: "hero", assetId: "asset_b", crop: null },
+          { slotId: "support-1", assetId: "asset_c", crop: null },
+        ],
+        backgroundColor: null,
+      },
+    ],
+  };
+}
+
+// hero-grid produces hero + support-N slots (no background).
+function heroGridPlan(recipe, heroCrop = null) {
+  return {
+    candidates: [
+      {
+        id: "ai_recipe_knobs",
+        label: "Hero grid with intent",
+        reason: "Semantic knobs drive focus, weight, and layering.",
+        harmonyScore: 0.9,
+        templateId: null,
+        recipe,
+        assignments: [
+          { slotId: "hero", assetId: "asset_b", crop: heroCrop },
+          { slotId: "support-1", assetId: "asset_a", crop: null },
+          { slotId: "support-2", assetId: "asset_c", crop: null },
+        ],
+        backgroundColor: null,
+      },
+    ],
+  };
+}
+
+test("plan schema passes recipe semantic knobs through", () => {
+  const result = aiLayoutPlanResponseSchema.parse(recipePlan(recipeWithKnobs));
+
+  assert.equal(result.candidates[0].recipe.layering, "strong");
+  assert.equal(
+    result.candidates[0].recipe.slotIntents.hero.cropIntent.focus,
+    "subject",
+  );
+  assert.equal(
+    result.candidates[0].recipe.slotIntents["support-1"].visualWeight,
+    undefined,
+  );
+});
+
+test("plan schema rejects out-of-vocabulary semantic knobs", () => {
+  const result = aiLayoutPlanResponseSchema.safeParse(
+    recipePlan({
+      ...recipeWithKnobs,
+      slotIntents: { hero: { cropIntent: { zoom: "extreme" } } },
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("compiler-mapped crop intents reach the materialized hero item", () => {
+  // Landscape 16:9 sources in a near-square hero slot: the cover crop is a
+  // horizontal band of width 0.56; focus "subject" re-centers that band on
+  // the subject box center (0.7, 0.4).
+  const knobbedRequest = {
+    ...request,
+    assets: [
+      analysis("asset_a", "#456fd6"),
+      {
+        ...analysis("asset_b", "#5278d8"),
+        subjectBox: { x: 0.6, y: 0.2, width: 0.2, height: 0.4 },
+      },
+      analysis("asset_c", "#3e64c0"),
+    ],
+  };
+  const safeHeroGridRecipe = {
+    ...recipeWithKnobs,
+    profile: "safe",
+    family: "hero-grid",
+    heroPosition: "left",
+    heroShare: 0.56,
+    supportCount: 2,
+    margin: 0.02,
+    gap: 0.012,
+    cornerRadius: 0.018,
+    rhythm: "ordered",
+    boundary: "clean-gap",
+    safeAreaPolicy: "avoid",
+    slotIntents: { hero: { cropIntent: { focus: "subject" } } },
+  };
+  const candidates = materializeAiLayoutPlan(
+    heroGridPlan(safeHeroGridRecipe),
+    knobbedRequest,
+  );
+
+  const hero = candidates[0].layout.items.find((item) => item.role === "hero");
+  assert.equal(hero.assetId, "asset_b");
+  assert.deepEqual(hero.crop.focalPoint, { x: 0.7, y: 0.4 });
+  assert.ok(Math.abs(hero.crop.width - 0.56) < 1e-4);
+  assert.ok(hero.crop.x <= 0.7 && 0.7 <= hero.crop.x + hero.crop.width);
+  assert.ok(hero.crop.y >= 0 && hero.crop.y + hero.crop.height <= 1);
+});
+
+test("an explicit model crop still wins over the recipe crop intent", () => {
+  const knobbedAssets = [
+    analysis("asset_a", "#456fd6"),
+    {
+      ...analysis("asset_b", "#5278d8"),
+      subjectBox: { x: 0.6, y: 0.2, width: 0.2, height: 0.4 },
+    },
+    analysis("asset_c", "#3e64c0"),
+  ];
+  const safeHeroGridRecipe = {
+    ...recipeWithKnobs,
+    profile: "safe",
+    family: "hero-grid",
+    heroPosition: "left",
+    heroShare: 0.56,
+    supportCount: 2,
+    margin: 0.02,
+    gap: 0.012,
+    cornerRadius: 0.018,
+    rhythm: "ordered",
+    boundary: "clean-gap",
+    safeAreaPolicy: "avoid",
+    slotIntents: { hero: { cropIntent: { focus: "subject" } } },
+  };
+  const explicit = materializeAiLayoutPlan(
+    heroGridPlan(safeHeroGridRecipe, {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      focalPoint: null,
+    }),
+    { ...request, assets: knobbedAssets },
+  );
+  const hero = explicit[0].layout.items.find((item) => item.role === "hero");
+  assert.deepEqual(
+    {
+      x: hero.crop.x,
+      y: hero.crop.y,
+      width: hero.crop.width,
+      height: hero.crop.height,
+    },
+    { x: 0, y: 0, width: 1, height: 1 },
+  );
+});
