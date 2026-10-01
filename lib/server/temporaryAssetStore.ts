@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -435,6 +443,51 @@ export async function readTemporaryAssetContent(
     contentType:
       variant === "thumbnail" ? "image/webp" : record.mimeType,
     expiresAt: record.expiresAt,
+  };
+}
+
+export async function readTemporaryAssetOriginalBuffer(
+  assetId: string,
+  sessionId: string,
+  options: TemporaryAssetStoreOptions = {},
+): Promise<{
+  assetId: string;
+  buffer: Buffer;
+  mimeType: TemporaryAssetRecord["mimeType"];
+}> {
+  // Same existence, expiry, and session-ownership checks as getTemporaryAsset.
+  const record = await getTemporaryAsset(assetId, sessionId, options);
+  const { original } = pathsFor(storageRoot(options), record.id);
+  // Size guard before reading (reuse the upload byte limit), then re-check the
+  // decoded length in case the file changed between stat and read.
+  const stats = await stat(original).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        throw new TemporaryAssetError(
+          "not_found",
+          "Temporary asset content is missing",
+        );
+      }
+      throw error;
+    },
+  );
+  if (!stats.isFile() || stats.size > MAX_FILE_BYTES) {
+    throw new TemporaryAssetError(
+      "invalid_file",
+      "Temporary asset content exceeds the 20MB limit",
+    );
+  }
+  const buffer = await readFile(original);
+  if (buffer.byteLength > MAX_FILE_BYTES) {
+    throw new TemporaryAssetError(
+      "invalid_file",
+      "Temporary asset content exceeds the 20MB limit",
+    );
+  }
+  return {
+    assetId: record.id,
+    buffer,
+    mimeType: record.mimeType,
   };
 }
 

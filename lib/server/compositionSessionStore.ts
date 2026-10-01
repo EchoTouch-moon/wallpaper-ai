@@ -8,13 +8,20 @@ import {
   compositionRefineRequestSchema,
   generateCompositionCandidatesAsync,
   refineCompositionCandidateAsync,
+  loadVisionPlanningConfig,
+  visionPlanningGateRequested,
+  type AssetContentReference,
   type LayoutModelProvider,
 } from "@wallpaper/core/layout-generation";
 import { layoutCandidateSchema } from "@wallpaper/core/layout";
 import type { LayoutCandidate } from "@wallpaper/core/types";
 import { z } from "zod";
 
-import type { TemporaryAssetRecord } from "./temporaryAssetStore.ts";
+import type {
+  TemporaryAssetRecord,
+  TemporaryAssetStoreOptions,
+} from "./temporaryAssetStore.ts";
+import { readTemporaryAssetOriginalBuffer } from "./temporaryAssetStore.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_REVISIONS = 20;
@@ -72,6 +79,12 @@ export interface CompositionStoreOptions {
   ttlMs?: number;
   compositionProvider?: LayoutModelProvider;
   environment?: Record<string, string | undefined>;
+  /**
+   * Forwarded to the temporary asset store when multimodal planning reads the
+   * original buffers (tests inject an isolated root; production uses the
+   * default ONE_TOUCH_STORAGE_DIR layout).
+   */
+  assetStoreOptions?: TemporaryAssetStoreOptions;
 }
 
 export class CompositionSessionError extends Error {
@@ -163,6 +176,69 @@ function assertSessionAccess(
   }
 }
 
+/**
+ * Multimodal planning gate (packages/core/src/layout-generation/llmConfig.ts):
+ * asset buffers are only read from disk when VISION_PLANNING_ENABLED resolves
+ * to a usable vision configuration. With the gate off, no asset file is read
+ * at all and the request stays byte-identical to the previous text-only shape.
+ */
+function visionPlanningGateEnabled(options: CompositionStoreOptions) {
+  return loadVisionPlanningConfig(options.environment ?? process.env) !== null;
+}
+
+/**
+ * Reads every asset's original buffer and assembles inline data URLs strictly
+ * in memory for the injected provider. dataUrls are never written to disk and
+ * never logged; any unreadable asset degrades the whole request to text-only
+ * planning (observable through the returned warning) without blocking
+ * generation.
+ */
+async function assembleAssetContent(
+  sessionId: string,
+  assets: TemporaryAssetRecord[],
+  options: CompositionStoreOptions,
+): Promise<AssetContentReference[]> {
+  const references: AssetContentReference[] = [];
+  for (const asset of assets) {
+    const content = await readTemporaryAssetOriginalBuffer(
+      asset.id,
+      sessionId,
+      options.assetStoreOptions ?? {},
+    );
+    references.push({
+      assetId: content.assetId,
+      dataUrl: `data:${content.mimeType};base64,${content.buffer.toString("base64")}`,
+    });
+  }
+  return references;
+}
+
+function visionAssemblyWarning(error: unknown) {
+  return `Vision planning asset content was unavailable; fell back to text-only planning. (${
+    error instanceof Error ? error.message : "unknown error"
+  })`;
+}
+
+/**
+ * Degradation observability for the gate itself (plan/multimodal-planning-
+ * protocol-design.md §2.4): with VISION_PLANNING_ENABLED=true but no usable
+ * key/model, the request silently degrades to text-only planning. This
+ * deterministic warning keeps that tier observable in the response warnings
+ * instead of making flag-on and flag-off states indistinguishable.
+ */
+const VISION_GATE_UNCONFIGURED_WARNING =
+  "Vision planning is enabled but no usable model configuration was found; using text-only planning.";
+
+function visionGateObservabilityWarnings(
+  options: CompositionStoreOptions,
+): string[] {
+  const environment = options.environment ?? process.env;
+  return visionPlanningGateRequested(environment) &&
+    loadVisionPlanningConfig(environment) === null
+    ? [VISION_GATE_UNCONFIGURED_WARNING]
+    : [];
+}
+
 export async function cleanupExpiredCompositions(
   options: CompositionStoreOptions = {},
 ) {
@@ -207,11 +283,28 @@ export async function createCompositionSession(
     );
   }
   await cleanupExpiredCompositions(options);
+  let assetContent: AssetContentReference[] | undefined;
+  const assemblyWarnings: string[] = [];
+  if (visionPlanningGateEnabled(options)) {
+    try {
+      assetContent = await assembleAssetContent(
+        parsedSessionId,
+        assets,
+        options,
+      );
+    } catch (error) {
+      // Any unreadable asset degrades the whole request to text-only planning;
+      // the wiring failure never blocks generation.
+      assetContent = undefined;
+      assemblyWarnings.push(visionAssemblyWarning(error));
+    }
+  }
   const generated = await generateCompositionCandidatesAsync(
     {
       brief,
       assets: assets.map((asset) => asset.analysis),
       candidateCount: 3,
+      ...(assetContent ? { assetContent } : {}),
     },
     {
       provider: options.compositionProvider,
@@ -234,7 +327,11 @@ export async function createCompositionSession(
     assetIds: assets.map((asset) => asset.id),
     candidates: generated.candidates,
     source: generated.source,
-    warnings: generated.warnings,
+    warnings: [
+      ...visionGateObservabilityWarnings(options),
+      ...assemblyWarnings,
+      ...generated.warnings,
+    ],
     revisions: [],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -282,12 +379,25 @@ export async function refineCompositionSession(
     );
   }
   const current = record.candidates[candidateIndex];
+  let assetContent: AssetContentReference[] | undefined;
+  const assemblyWarnings: string[] = [];
+  if (visionPlanningGateEnabled(options)) {
+    try {
+      assetContent = await assembleAssetContent(sessionId, assets, options);
+    } catch (error) {
+      // Same degradation contract as generation: text-only planning, never a
+      // blocked refinement.
+      assetContent = undefined;
+      assemblyWarnings.push(visionAssemblyWarning(error));
+    }
+  }
   const refineRequest = compositionRefineRequestSchema.parse({
     brief: record.brief,
     assets: assets.map((asset) => asset.analysis),
     currentLayout: current.layout,
     instruction,
     locked,
+    ...(assetContent ? { assetContent } : {}),
   });
   const currentRecipe = refineRequest.currentLayout.template?.recipe;
   if (!currentRecipe) {
@@ -317,7 +427,12 @@ export async function refineCompositionSession(
     ...record,
     candidates,
     source: refined.source === "ai" ? "ai" : record.source,
-    warnings: [...record.warnings, ...refined.warnings].slice(-8),
+    warnings: [
+      ...record.warnings,
+      ...visionGateObservabilityWarnings(options),
+      ...assemblyWarnings,
+      ...refined.warnings,
+    ].slice(-8),
     revisions: [
       ...record.revisions.slice(-(MAX_REVISIONS - 1)),
       {
