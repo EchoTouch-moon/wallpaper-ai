@@ -6,6 +6,8 @@
 
 ## 方向 A：生成协议统一（消除 legacyRequest 双栈）— 推荐首选
 
+> 2026-10-01 更新：本方向已扩展为「多模态编排协议 v2」——与"让规划 LLM 看到图片、通过受约束控制词表驱动编排"合并设计，详见 [multimodal-planning-protocol-design.md](./multimodal-planning-protocol-design.md)。
+
 **现状（证据）**
 
 - OneTouch 主链路：`/api/compositions` → `generateCompositionCandidatesAsync` → `OpenAICompatibleLayoutProvider.generatePlan({ request: legacyRequest(brief, assets) })`。`generateCompositionCandidatesAsync.ts` 的 `legacyRequest()` 把 `CompositionBrief` 翻译回旧的 `GenerateLayoutRequest` 形状（`intent.mode/style/compositionIntent/safeArea/count`）喂给 provider。
