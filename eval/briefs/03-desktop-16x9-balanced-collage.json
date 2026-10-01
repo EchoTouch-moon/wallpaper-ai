@@ -1,0 +1,108 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "16:9",
+      "width": 3840,
+      "height": 2160,
+      "usage": "desktop"
+    },
+    "intent": {
+      "prompt": "Balanced Kyoto travel mosaic: four temple and street photos sharing similar cedar-and-moss tones, no single image dominating",
+      "hierarchy": "balanced",
+      "density": "balanced",
+      "rhythm": "ordered",
+      "visualFlow": "center-out",
+      "moodTags": ["serene", "earthy", "travel"]
+    },
+    "constraints": {
+      "safeAreas": ["desktop-icons-left", "desktop-dock"],
+      "preserveFaces": false,
+      "preserveText": true,
+      "cropTolerance": "medium"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a03-temple-veranda",
+      "width": 2048,
+      "height": 1536,
+      "orientation": "landscape",
+      "aspectRatio": 1.3333,
+      "resolutionScore": 0.6158,
+      "dominantColors": ["#8a7a5c", "#5c6a48", "#302e26"],
+      "averageColor": "#6c6a52",
+      "brightness": 0.55,
+      "saturation": 0.24,
+      "contrast": 0.44,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.24, "y": 0.26, "width": 0.5, "height": 0.42 },
+      "saliencyCenter": { "x": 0.48, "y": 0.46 },
+      "styleTags": ["cedar", "temple", "green"],
+      "bestUse": ["triptych", "support", "hero"],
+      "cropSafety": "medium"
+    },
+    {
+      "assetId": "a03-moss-garden",
+      "width": 2048,
+      "height": 1536,
+      "orientation": "landscape",
+      "aspectRatio": 1.3333,
+      "resolutionScore": 0.6158,
+      "dominantColors": ["#74855c", "#4a5a3c", "#262e20"],
+      "averageColor": "#5e6a4a",
+      "brightness": 0.5,
+      "saturation": 0.32,
+      "contrast": 0.38,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.3, "y": 0.34, "width": 0.42, "height": 0.36 },
+      "saliencyCenter": { "x": 0.5, "y": 0.52 },
+      "styleTags": ["moss", "soft-light", "quiet"],
+      "bestUse": ["triptych", "background"],
+      "cropSafety": "high"
+    },
+    {
+      "assetId": "a03-old-street",
+      "width": 2048,
+      "height": 1536,
+      "orientation": "landscape",
+      "aspectRatio": 1.3333,
+      "resolutionScore": 0.6158,
+      "dominantColors": ["#9a8468", "#6a5c4a", "#3a3228"],
+      "averageColor": "#726250",
+      "brightness": 0.58,
+      "saturation": 0.22,
+      "contrast": 0.46,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.36, "y": 0.22, "width": 0.32, "height": 0.52 },
+      "saliencyCenter": { "x": 0.52, "y": 0.48 },
+      "styleTags": ["machiya", "afternoon", "travel"],
+      "bestUse": ["triptych", "support"],
+      "cropSafety": "medium"
+    },
+    {
+      "assetId": "a03-bamboo-grove",
+      "width": 2560,
+      "height": 1440,
+      "orientation": "landscape",
+      "aspectRatio": 1.7778,
+      "resolutionScore": 0.6667,
+      "dominantColors": ["#a4bc7c", "#5e7a44", "#2a3822"],
+      "averageColor": "#74905c",
+      "brightness": 0.62,
+      "saturation": 0.35,
+      "contrast": 0.4,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.2, "y": 0.2, "width": 0.6, "height": 0.5 },
+      "saliencyCenter": { "x": 0.48, "y": 0.5 },
+      "styleTags": ["bamboo", "dappled", "green"],
+      "bestUse": ["hero", "background", "triptych"],
+      "cropSafety": "high"
+    }
+  ],
+  "candidateCount": 3
+}

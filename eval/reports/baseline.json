@@ -1,0 +1,115 @@
+{
+  "schema": "composition-eval-baseline/1",
+  "generator": "scripts/eval-compositions.mjs",
+  "node": "v22.23.2",
+  "gitCommit": "9bfc33a",
+  "fixtureCount": 10,
+  "fixtures": [
+    {
+      "file": "01-desktop-16x9-single-hero.json",
+      "coverage": "16:9 · desktop · single-hero · balanced · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.178782,
+        "colorHarmony": 0.958161,
+        "total": 0.712314
+      }
+    },
+    {
+      "file": "02-desktop-16x9-hero-support.json",
+      "coverage": "16:9 · desktop · hero-support · balanced · asymmetric",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.182986,
+        "colorHarmony": 0.635829,
+        "total": 0.606272
+      }
+    },
+    {
+      "file": "03-desktop-16x9-balanced-collage.json",
+      "coverage": "16:9 · desktop · balanced · balanced · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.244414,
+        "colorHarmony": 0.867018,
+        "total": 0.703811
+      }
+    },
+    {
+      "file": "04-mobile-9x16-widgets.json",
+      "coverage": "9:16 · mobile · hero-support · balanced · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.008442,
+        "colorHarmony": 0.638363,
+        "total": 0.548935
+      }
+    },
+    {
+      "file": "05-ultrawide-21x9-desktop.json",
+      "coverage": "21:9 · ultrawide · balanced · balanced · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.182303,
+        "colorHarmony": 0.711478,
+        "total": 0.63126
+      }
+    },
+    {
+      "file": "06-custom-2048x1280-laptop.json",
+      "coverage": "custom · laptop · hero-support · minimal · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.470743,
+        "colorHarmony": 0.961069,
+        "total": 0.810604
+      }
+    },
+    {
+      "file": "07-lock-screen-9x19x5-clock.json",
+      "coverage": "9:19.5 · lock-screen · hero-support · balanced · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.008304,
+        "colorHarmony": 0.574188,
+        "total": 0.527497
+      }
+    },
+    {
+      "file": "08-desktop-16x9-dense.json",
+      "coverage": "16:9 · desktop · balanced · dense · asymmetric",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.174789,
+        "colorHarmony": 0.700637,
+        "total": 0.625142
+      }
+    },
+    {
+      "file": "09-desktop-16x9-minimal.json",
+      "coverage": "16:9 · desktop · single-hero · minimal · ordered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.348039,
+        "colorHarmony": 0.976166,
+        "total": 0.774735
+      }
+    },
+    {
+      "file": "10-desktop-16x9-layered-cn.json",
+      "coverage": "16:9 · desktop · hero-support · dense · layered",
+      "metrics": {
+        "focusFidelity": 1,
+        "safeAreaAdherence": 0.192996,
+        "colorHarmony": 0.647552,
+        "total": 0.613516
+      }
+    }
+  ],
+  "aggregate": {
+    "focusFidelity": 1,
+    "safeAreaAdherence": 0.19918,
+    "colorHarmony": 0.767046,
+    "total": 0.655409
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "9:19.5",
+      "width": 1440,
+      "height": 3120,
+      "usage": "lock-screen"
+    },
+    "intent": {
+      "prompt": "Lock screen for a tall phone: warm portrait photo under the clock strip, two calm sunset shots below, nothing busy behind the clock area",
+      "heroAssetId": "a07-portrait-warm",
+      "hierarchy": "hero-support",
+      "density": "balanced",
+      "rhythm": "ordered",
+      "visualFlow": "top-to-bottom",
+      "moodTags": ["warm", "portrait", "golden-hour"]
+    },
+    "constraints": {
+      "safeAreas": ["mobile-clock", "mobile-widget-center"],
+      "preserveFaces": true,
+      "preserveText": true,
+      "cropTolerance": "low"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a07-portrait-warm",
+      "width": 3024,
+      "height": 4032,
+      "orientation": "portrait",
+      "aspectRatio": 0.75,
+      "resolutionScore": 1,
+      "dominantColors": ["#e8b48c", "#a86e54", "#4a3428"],
+      "averageColor": "#b4866a",
+      "brightness": 0.62,
+      "saturation": 0.36,
+      "contrast": 0.48,
+      "contentType": "portrait",
+      "faces": [{ "x": 0.4, "y": 0.14, "width": 0.2, "height": 0.24 }],
+      "subjectBox": { "x": 0.28, "y": 0.1, "width": 0.44, "height": 0.72 },
+      "saliencyCenter": { "x": 0.5, "y": 0.34 },
+      "styleTags": ["golden-hour", "warm", "portrait"],
+      "bestUse": ["hero", "portrait-collage"],
+      "cropSafety": "low"
+    },
+    {
+      "assetId": "a07-sunset-sky",
+      "width": 2160,
+      "height": 3840,
+      "orientation": "portrait",
+      "aspectRatio": 0.5625,
+      "resolutionScore": 1,
+      "dominantColors": ["#f2a878", "#c46a72", "#3a2a4e"],
+      "averageColor": "#b4686e",
+      "brightness": 0.56,
+      "saturation": 0.5,
+      "contrast": 0.46,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.2, "y": 0.26, "width": 0.6, "height": 0.4 },
+      "saliencyCenter": { "x": 0.5, "y": 0.44 },
+      "styleTags": ["sunset", "gradient", "soft-focus"],
+      "bestUse": ["support", "background"],
+      "cropSafety": "high"
+    },
+    {
+      "assetId": "a07-silhouette-pier",
+      "width": 1620,
+      "height": 2880,
+      "orientation": "portrait",
+      "aspectRatio": 0.5625,
+      "resolutionScore": 0.75,
+      "dominantColors": ["#5e6480", "#343c54", "#121626"],
+      "averageColor": "#484e64",
+      "brightness": 0.32,
+      "saturation": 0.22,
+      "contrast": 0.52,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.34, "y": 0.32, "width": 0.36, "height": 0.4 },
+      "saliencyCenter": { "x": 0.5, "y": 0.5 },
+      "styleTags": ["silhouette", "dusk", "pier"],
+      "bestUse": ["support", "portrait-collage"],
+      "cropSafety": "medium"
+    }
+  ],
+  "candidateCount": 3
+}

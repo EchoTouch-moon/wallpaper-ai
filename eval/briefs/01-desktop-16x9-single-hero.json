@@ -1,0 +1,69 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "16:9",
+      "width": 3840,
+      "height": 2160,
+      "usage": "desktop"
+    },
+    "intent": {
+      "prompt": "Minimal calm desktop wallpaper: one bold cat portrait dominating the left side with a quiet blurred interior behind it, warm golden-hour tones",
+      "heroAssetId": "a01-cat-closeup",
+      "hierarchy": "single-hero",
+      "density": "balanced",
+      "rhythm": "ordered",
+      "visualFlow": "left-to-right",
+      "moodTags": ["minimal", "warm", "calm"]
+    },
+    "constraints": {
+      "safeAreas": ["desktop-icons-left", "desktop-dock"],
+      "preserveFaces": false,
+      "preserveText": true,
+      "cropTolerance": "low"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a01-cat-closeup",
+      "width": 3024,
+      "height": 3024,
+      "orientation": "square",
+      "aspectRatio": 1,
+      "resolutionScore": 1,
+      "dominantColors": ["#c8a27a", "#8a6a4e", "#3a3028"],
+      "averageColor": "#9b7f63",
+      "brightness": 0.61,
+      "saturation": 0.38,
+      "contrast": 0.52,
+      "contentType": "pet",
+      "faces": [],
+      "subjectBox": { "x": 0.32, "y": 0.22, "width": 0.38, "height": 0.5 },
+      "saliencyCenter": { "x": 0.51, "y": 0.46 },
+      "styleTags": ["warm", "soft-focus", "golden-hour"],
+      "bestUse": ["hero", "irregular-collage"],
+      "cropSafety": "medium"
+    },
+    {
+      "assetId": "a01-interior-wide",
+      "width": 3840,
+      "height": 2160,
+      "orientation": "landscape",
+      "aspectRatio": 1.7778,
+      "resolutionScore": 1,
+      "dominantColors": ["#b8ad9e", "#7d7266", "#4a443c"],
+      "averageColor": "#8f8578",
+      "brightness": 0.66,
+      "saturation": 0.14,
+      "contrast": 0.34,
+      "contentType": "architecture",
+      "faces": [],
+      "subjectBox": { "x": 0.38, "y": 0.42, "width": 0.26, "height": 0.3 },
+      "saliencyCenter": { "x": 0.5, "y": 0.54 },
+      "styleTags": ["neutral", "soft-focus", "quiet"],
+      "bestUse": ["background", "support"],
+      "cropSafety": "high"
+    }
+  ],
+  "candidateCount": 3
+}

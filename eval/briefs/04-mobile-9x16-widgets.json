@@ -1,0 +1,89 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "9:16",
+      "width": 2160,
+      "height": 3840,
+      "usage": "mobile"
+    },
+    "intent": {
+      "prompt": "Home screen wallpaper with a strong aurora shot on top, stacked travel photos below, keep the clock strip and the widget band clear of any busy detail",
+      "heroAssetId": "a04-aurora-panorama",
+      "hierarchy": "hero-support",
+      "density": "balanced",
+      "rhythm": "ordered",
+      "visualFlow": "top-to-bottom",
+      "moodTags": ["vivid", "night", "travel"]
+    },
+    "constraints": {
+      "safeAreas": ["mobile-clock", "mobile-widget-center"],
+      "preserveFaces": false,
+      "preserveText": true,
+      "cropTolerance": "low"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a04-aurora-panorama",
+      "width": 1080,
+      "height": 2400,
+      "orientation": "portrait",
+      "aspectRatio": 0.45,
+      "resolutionScore": 0.559,
+      "dominantColors": ["#3ce8b4", "#2a5e9e", "#0a1430"],
+      "averageColor": "#2d5a7a",
+      "brightness": 0.34,
+      "saturation": 0.72,
+      "contrast": 0.62,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.22, "y": 0.24, "width": 0.56, "height": 0.44 },
+      "saliencyCenter": { "x": 0.5, "y": 0.46 },
+      "styleTags": ["aurora", "night", "vivid"],
+      "bestUse": ["hero", "portrait-collage"],
+      "cropSafety": "high"
+    },
+    {
+      "assetId": "a04-fjord-peak",
+      "width": 1620,
+      "height": 2880,
+      "orientation": "portrait",
+      "aspectRatio": 0.5625,
+      "resolutionScore": 0.75,
+      "dominantColors": ["#9ec4d8", "#4e7a9c", "#22364c"],
+      "averageColor": "#6c92ac",
+      "brightness": 0.6,
+      "saturation": 0.3,
+      "contrast": 0.5,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.3, "y": 0.3, "width": 0.4, "height": 0.4 },
+      "saliencyCenter": { "x": 0.5, "y": 0.48 },
+      "styleTags": ["fjord", "crisp", "daylight"],
+      "bestUse": ["support", "portrait-collage"],
+      "cropSafety": "high"
+    },
+    {
+      "assetId": "a04-city-dusk",
+      "width": 2160,
+      "height": 3840,
+      "orientation": "portrait",
+      "aspectRatio": 0.5625,
+      "resolutionScore": 1,
+      "dominantColors": ["#f2a45a", "#8a4e6e", "#1c1a34"],
+      "averageColor": "#8a5670",
+      "brightness": 0.4,
+      "saturation": 0.58,
+      "contrast": 0.6,
+      "contentType": "architecture",
+      "faces": [],
+      "subjectBox": { "x": 0.34, "y": 0.36, "width": 0.34, "height": 0.36 },
+      "saliencyCenter": { "x": 0.5, "y": 0.52 },
+      "styleTags": ["dusk", "city", "neon"],
+      "bestUse": ["support", "hero"],
+      "cropSafety": "medium"
+    }
+  ],
+  "candidateCount": 3
+}

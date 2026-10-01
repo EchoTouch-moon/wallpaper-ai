@@ -1,0 +1,109 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "16:9",
+      "width": 3840,
+      "height": 2160,
+      "usage": "desktop"
+    },
+    "intent": {
+      "prompt": "把四张京都旅行照片拼成一张有层次的桌面壁纸：灯笼竖图做主视觉，鸟居和八坂塔半叠压在后面，右下角配一张抹茶静物小卡，深色底，视觉重心在右侧",
+      "heroAssetId": "a10-lantern",
+      "hierarchy": "hero-support",
+      "density": "dense",
+      "rhythm": "layered",
+      "visualFlow": "right-to-left",
+      "moodTags": ["京都", "夜色", "层次", "深色"]
+    },
+    "constraints": {
+      "safeAreas": ["desktop-icons-left", "desktop-dock"],
+      "preserveFaces": false,
+      "preserveText": true,
+      "cropTolerance": "medium"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a10-lantern",
+      "width": 3024,
+      "height": 4032,
+      "orientation": "portrait",
+      "aspectRatio": 0.75,
+      "resolutionScore": 1,
+      "dominantColors": ["#f2b056", "#a04028", "#241418"],
+      "averageColor": "#a65c40",
+      "brightness": 0.42,
+      "saturation": 0.6,
+      "contrast": 0.58,
+      "contentType": "object",
+      "faces": [],
+      "subjectBox": { "x": 0.32, "y": 0.18, "width": 0.36, "height": 0.56 },
+      "saliencyCenter": { "x": 0.5, "y": 0.42 },
+      "styleTags": ["lantern", "warm-glow", "night"],
+      "bestUse": ["hero", "portrait-collage"],
+      "cropSafety": "low"
+    },
+    {
+      "assetId": "a10-torii-gate",
+      "width": 2160,
+      "height": 3840,
+      "orientation": "portrait",
+      "aspectRatio": 0.5625,
+      "resolutionScore": 1,
+      "dominantColors": ["#c93e2e", "#6a1e24", "#1a1216"],
+      "averageColor": "#8a2e2c",
+      "brightness": 0.34,
+      "saturation": 0.56,
+      "contrast": 0.52,
+      "contentType": "architecture",
+      "faces": [],
+      "subjectBox": { "x": 0.3, "y": 0.22, "width": 0.4, "height": 0.56 },
+      "saliencyCenter": { "x": 0.5, "y": 0.46 },
+      "styleTags": ["torii", "vermilion", "night"],
+      "bestUse": ["support", "portrait-collage"],
+      "cropSafety": "medium"
+    },
+    {
+      "assetId": "a10-yasaka-pagoda",
+      "width": 4032,
+      "height": 3024,
+      "orientation": "landscape",
+      "aspectRatio": 1.3333,
+      "resolutionScore": 1,
+      "dominantColors": ["#4a5470", "#2a3048", "#12141f"],
+      "averageColor": "#3e4460",
+      "brightness": 0.3,
+      "saturation": 0.24,
+      "contrast": 0.5,
+      "contentType": "architecture",
+      "faces": [],
+      "subjectBox": { "x": 0.32, "y": 0.24, "width": 0.38, "height": 0.56 },
+      "saliencyCenter": { "x": 0.5, "y": 0.46 },
+      "styleTags": ["pagoda", "blue-hour", "night"],
+      "bestUse": ["hero", "background", "triptych"],
+      "cropSafety": "medium"
+    },
+    {
+      "assetId": "a10-matcha-still",
+      "width": 2400,
+      "height": 2400,
+      "orientation": "square",
+      "aspectRatio": 1,
+      "resolutionScore": 0.833,
+      "dominantColors": ["#8aa06a", "#4e5e3c", "#20261a"],
+      "averageColor": "#64744e",
+      "brightness": 0.46,
+      "saturation": 0.3,
+      "contrast": 0.4,
+      "contentType": "object",
+      "faces": [],
+      "subjectBox": { "x": 0.3, "y": 0.32, "width": 0.4, "height": 0.36 },
+      "saliencyCenter": { "x": 0.5, "y": 0.5 },
+      "styleTags": ["matcha", "still-life", "green"],
+      "bestUse": ["support", "irregular-collage"],
+      "cropSafety": "high"
+    }
+  ],
+  "candidateCount": 3
+}

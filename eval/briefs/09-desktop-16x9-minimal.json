@@ -1,0 +1,69 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "16:9",
+      "width": 3840,
+      "height": 2160,
+      "usage": "desktop"
+    },
+    "intent": {
+      "prompt": "Minimal desert desktop: one wide dune image carrying the wallpaper with a very small detail inset, mostly negative space, warm beige palette",
+      "heroAssetId": "a09-dune-wide",
+      "hierarchy": "single-hero",
+      "density": "minimal",
+      "rhythm": "ordered",
+      "visualFlow": "left-to-right",
+      "moodTags": ["minimal", "desert", "negative-space"]
+    },
+    "constraints": {
+      "safeAreas": ["desktop-icons-left", "desktop-dock"],
+      "preserveFaces": false,
+      "preserveText": true,
+      "cropTolerance": "low"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a09-dune-wide",
+      "width": 3840,
+      "height": 2560,
+      "orientation": "landscape",
+      "aspectRatio": 1.5,
+      "resolutionScore": 1,
+      "dominantColors": ["#e8d8be", "#c8ac88", "#8a7460"],
+      "averageColor": "#d0bc9e",
+      "brightness": 0.78,
+      "saturation": 0.18,
+      "contrast": 0.28,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.22, "y": 0.4, "width": 0.56, "height": 0.32 },
+      "saliencyCenter": { "x": 0.5, "y": 0.54 },
+      "styleTags": ["dune", "negative-space", "beige"],
+      "bestUse": ["hero", "background"],
+      "cropSafety": "high"
+    },
+    {
+      "assetId": "a09-ripples-detail",
+      "width": 1440,
+      "height": 1800,
+      "orientation": "portrait",
+      "aspectRatio": 0.8,
+      "resolutionScore": 0.559,
+      "dominantColors": ["#dcc8a8", "#b09878", "#7c684e"],
+      "averageColor": "#c4b090",
+      "brightness": 0.74,
+      "saturation": 0.16,
+      "contrast": 0.3,
+      "contentType": "object",
+      "faces": [],
+      "subjectBox": { "x": 0.24, "y": 0.3, "width": 0.5, "height": 0.42 },
+      "saliencyCenter": { "x": 0.5, "y": 0.5 },
+      "styleTags": ["ripple", "detail", "warm"],
+      "bestUse": ["support", "portrait-collage"],
+      "cropSafety": "high"
+    }
+  ],
+  "candidateCount": 3
+}

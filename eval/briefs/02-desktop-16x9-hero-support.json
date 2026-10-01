@@ -1,0 +1,89 @@
+{
+  "brief": {
+    "version": "1.0",
+    "target": {
+      "ratioId": "16:9",
+      "width": 3840,
+      "height": 2160,
+      "usage": "desktop"
+    },
+    "intent": {
+      "prompt": "Tokyo night wallpaper with the tower as the clear hero on the right and two smaller street shots supporting it on the left, deep blue and amber palette",
+      "heroAssetId": "a02-tokyo-tower",
+      "hierarchy": "hero-support",
+      "density": "balanced",
+      "rhythm": "asymmetric",
+      "visualFlow": "right-to-left",
+      "moodTags": ["night", "cinematic", "neon"]
+    },
+    "constraints": {
+      "safeAreas": ["desktop-icons-left", "desktop-dock"],
+      "preserveFaces": false,
+      "preserveText": true,
+      "cropTolerance": "medium"
+    }
+  },
+  "assets": [
+    {
+      "assetId": "a02-tokyo-tower",
+      "width": 2160,
+      "height": 3840,
+      "orientation": "portrait",
+      "aspectRatio": 0.5625,
+      "resolutionScore": 1,
+      "dominantColors": ["#f2a444", "#7a4ea6", "#0d1030"],
+      "averageColor": "#5d4b74",
+      "brightness": 0.38,
+      "saturation": 0.57,
+      "contrast": 0.66,
+      "contentType": "architecture",
+      "faces": [],
+      "subjectBox": { "x": 0.34, "y": 0.12, "width": 0.34, "height": 0.62 },
+      "saliencyCenter": { "x": 0.5, "y": 0.4 },
+      "styleTags": ["night", "cinematic", "landmark"],
+      "bestUse": ["hero", "portrait-collage"],
+      "cropSafety": "low"
+    },
+    {
+      "assetId": "a02-lantern-alley",
+      "width": 1440,
+      "height": 1920,
+      "orientation": "portrait",
+      "aspectRatio": 0.75,
+      "resolutionScore": 0.5774,
+      "dominantColors": ["#e8912f", "#6b3040", "#1c1526"],
+      "averageColor": "#7e5136",
+      "brightness": 0.42,
+      "saturation": 0.62,
+      "contrast": 0.58,
+      "contentType": "architecture",
+      "faces": [],
+      "subjectBox": { "x": 0.26, "y": 0.3, "width": 0.44, "height": 0.44 },
+      "saliencyCenter": { "x": 0.48, "y": 0.52 },
+      "styleTags": ["neon", "moody", "vertical"],
+      "bestUse": ["support", "portrait-collage"],
+      "cropSafety": "medium"
+    },
+    {
+      "assetId": "a02-fuji-sunrise",
+      "width": 4032,
+      "height": 3024,
+      "orientation": "landscape",
+      "aspectRatio": 1.3333,
+      "resolutionScore": 1,
+      "dominantColors": ["#e8c8c0", "#9aa4c0", "#42506e"],
+      "averageColor": "#a8a6b0",
+      "brightness": 0.7,
+      "saturation": 0.28,
+      "contrast": 0.42,
+      "contentType": "landscape",
+      "faces": [],
+      "subjectBox": { "x": 0.28, "y": 0.34, "width": 0.46, "height": 0.4 },
+      "saliencyCenter": { "x": 0.5, "y": 0.52 },
+      "styleTags": ["sunrise", "hazy", "pastel"],
+      "bestUse": ["hero", "background", "triptych"],
+      "cropSafety": "high"
+    }
+  ],
+  "candidateCount": 3
+}
