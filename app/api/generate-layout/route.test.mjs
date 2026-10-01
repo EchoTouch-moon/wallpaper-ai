@@ -140,7 +140,7 @@ test("generate-layout async API materializes an injected provider plan", async (
     },
     {
       provider: {
-        async generatePlan() {
+        async generateLegacyPlan() {
           return {
             candidates: [
               {
@@ -191,7 +191,7 @@ test("generate-layout async API replaces one invalid model candidate", async () 
     },
     {
       provider: {
-        async generatePlan() {
+        async generateLegacyPlan() {
           return {
             candidates: [
               valid,
@@ -227,7 +227,7 @@ test("generate-layout validates refine requests before calling the provider", as
     },
     {
       provider: {
-        async generatePlan() {
+        async generateLegacyPlan() {
           throw new Error("Provider should not be called");
         },
       },
@@ -261,7 +261,7 @@ test("generate-layout sends refine operation and current layout to provider", as
     },
     {
       provider: {
-        async generatePlan(input) {
+        async generateLegacyPlan(input) {
           capturedOperation = input.operation;
           capturedCurrentLayout = input.request.currentLayout;
           return {

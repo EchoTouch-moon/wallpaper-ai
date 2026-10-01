@@ -100,7 +100,7 @@ test("uses model recipes while preserving explicit brief constraints", async () 
     {
       provider: {
         async generatePlan(input) {
-          capturedRequest = input.request;
+          capturedRequest = input;
           return {
             candidates: [
               candidate("model_safe", "safe", "hero-grid", [
@@ -138,7 +138,12 @@ test("uses model recipes while preserving explicit brief constraints", async () 
       "asset_b",
     );
   });
-  assert.equal(capturedRequest.intent.userPrompt, brief.intent.prompt);
+  assert.equal(capturedRequest.version, "2.0");
+  assert.equal(capturedRequest.operation, "generate");
+  assert.deepEqual(capturedRequest.brief, brief);
+  assert.deepEqual(capturedRequest.assets, assets);
+  assert.equal(capturedRequest.refineInstruction, undefined);
+  assert.equal(capturedRequest.previousCandidates, undefined);
 });
 
 test("falls back when the composition model is not configured", async () => {
@@ -152,6 +157,56 @@ test("falls back when the composition model is not configured", async () => {
   assert.match(response.warnings[0], /LLM_API_KEY/);
 });
 
+test("falls back to deterministic recipes when the planning provider fails", async () => {
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3 },
+    {
+      provider: {
+        async generatePlan() {
+          throw new Error("Vision planning endpoint is down");
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "recipe-fallback");
+  assert.equal(response.candidates.length, 3);
+  assert.equal(
+    response.candidates.every((item) => item.usedFallback),
+    true,
+  );
+  assert.match(response.warnings[0], /AI planner unavailable: Vision planning endpoint is down/);
+});
+
+test("falls back when every model candidate lacks a usable recipe", async () => {
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3 },
+    {
+      provider: {
+        async generatePlan() {
+          return {
+            candidates: [
+              {
+                ...candidate(
+                  "model_template_only",
+                  "safe",
+                  "hero-grid",
+                  ["hero", "support-1", "support-2"],
+                ),
+                recipe: null,
+                templateId: "triptych_desktop_equal",
+              },
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "recipe-fallback");
+  assert.equal(response.candidates.length, 3);
+});
+
 test("uses the model for natural-language recipe refinement", async () => {
   const current = generateCompositionCandidates({
     brief,
@@ -159,6 +214,7 @@ test("uses the model for natural-language recipe refinement", async () => {
     candidateCount: 3,
   }).candidates[0];
   let capturedOperation;
+  let capturedInstruction;
   let capturedLayout;
   const response = await refineCompositionCandidateAsync(
     {
@@ -176,7 +232,8 @@ test("uses the model for natural-language recipe refinement", async () => {
       provider: {
         async generatePlan(input) {
           capturedOperation = input.operation;
-          capturedLayout = input.request.currentLayout;
+          capturedInstruction = input.refineInstruction;
+          capturedLayout = input.previousCandidates[0];
           return {
             candidates: [
               candidate(
@@ -204,5 +261,48 @@ test("uses the model for natural-language recipe refinement", async () => {
     "asset_b",
   );
   assert.equal(capturedOperation, "refine");
+  assert.equal(
+    capturedInstruction,
+    "Make the layout more layered and move the hero right.",
+  );
   assert.deepEqual(capturedLayout, current.layout);
+});
+
+test("falls back to deterministic refinement when the planning provider fails", async () => {
+  const current = generateCompositionCandidates({
+    brief,
+    assets,
+    candidateCount: 3,
+  }).candidates[0];
+  const response = await refineCompositionCandidateAsync(
+    {
+      brief,
+      assets,
+      currentLayout: current.layout,
+      instruction: "Make the layout more layered and move the hero right.",
+      locked: {
+        target: true,
+        heroAsset: true,
+        safeAreas: true,
+      },
+    },
+    {
+      provider: {
+        async generatePlan() {
+          throw new Error("Vision planning endpoint is down");
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "recipe-fallback");
+  assert.equal(
+    response.candidate.layout.items.find((item) => item.role === "hero")
+      .assetId,
+    "asset_b",
+  );
+  assert.match(
+    response.warnings[0],
+    /AI refinement unavailable: Vision planning endpoint is down/,
+  );
 });

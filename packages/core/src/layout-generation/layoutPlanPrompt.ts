@@ -1,5 +1,7 @@
 import { WALLPAPER_TEMPLATES } from "../layout/templates.ts";
+import { planningRatio } from "./compositionBrief.ts";
 import type { LayoutModelRequest } from "./provider.ts";
+import type { PlanningRequest } from "./planningProtocol.ts";
 
 export const AI_LAYOUT_PLAN_JSON_SCHEMA = {
   type: "object",
@@ -189,6 +191,56 @@ export const AI_LAYOUT_PLAN_JSON_SCHEMA = {
   },
 } as const;
 
+const LAYOUT_PLAN_OUTPUT_RULES = [
+  "You plan editable photo wallpaper layouts.",
+  "Return JSON only. Never return markdown or UI instructions.",
+  "Prefer a parameterized recipe. Use a registered template only when refining a registered layout.",
+  "For a recipe candidate set templateId to null. For a registered candidate set recipe to null.",
+  "Recipe supportCount must equal the number of assets minus one.",
+  "When returning three candidates, return exactly one safe, one editorial, and one dynamic recipe profile.",
+  "Use stable generated slot IDs: hero, support-1 onward; layered-collage also starts with background.",
+  "Assign every template slot exactly once.",
+  "Use only supplied asset IDs.",
+  "Do not create canvas coordinates, Fabric objects, polygons, image URLs, or image data.",
+  "Use null when no crop or background override is needed.",
+] as const;
+
+const RECIPE_PROFILE_GOALS = [
+  {
+    profile: "safe",
+    goal: "ordered structure, generous safe areas, conservative cropping",
+  },
+  {
+    profile: "editorial",
+    goal: "asymmetric hierarchy, magazine rhythm, intentional whitespace",
+  },
+  {
+    profile: "dynamic",
+    goal: "layered depth, stronger scale contrast, controlled overlap",
+  },
+] as const;
+
+function candidateCountRule(candidateCount: number) {
+  return `Return exactly ${candidateCount} candidate${candidateCount === 1 ? "" : "s"}.`;
+}
+
+const BRIEF_PLANNING_RULES = [
+  "Map the composition brief to recipe semantics directly: hierarchy decides how strongly the hero dominates, density decides margin, gap, and heroShare, rhythm decides the recipe rhythm field, and visualFlow decides heroPosition and the support arrangement.",
+  "When the brief names a heroAssetId, that exact asset must occupy the hero slot; keep it there even when its analysis suggests a supporting role.",
+  "Honor the brief target: desktop and laptop canvases keep salient content away from icon and dock safe areas, ultrawide canvases favor horizontal flows, mobile and lock-screen canvases favor top-to-bottom flows, and a lock-screen canvas keeps the clock and widget areas visually quiet.",
+  "Respect the brief constraints: preserveFaces and preserveText protect detected faces and text-heavy content from being cropped away, cropTolerance bounds how tightly an asset may be cropped, and safeAreas must stay free of salient content.",
+  "Treat the brief prompt as the primary creative intent; the structural hierarchy, density, rhythm, and visualFlow fields qualify it, never override it.",
+] as const;
+
+const ASSET_ANALYSIS_RULES = [
+  "Use the per-asset vision patches when assigning slots: faces, subjectBox, and saliencyCenter locate the content that must survive cropping, contentType and styleTags reveal subject matter and mood, bestUse suggests the natural role for each asset, and cropSafety bounds how aggressively each asset may be cropped.",
+  "Prefer assets with high resolution, high contrast, and hero-appropriate content in the hero slot, and arrange adjacent assets so their dominant colors stay harmonious.",
+] as const;
+
+const REFINE_PLANNING_RULES = [
+  "For refine operations, treat previousCandidates as the layouts to improve: keep what already works, apply the refineInstruction as a localized change, and keep the brief constraints unchanged.",
+] as const;
+
 export function createLayoutPlanMessages(input: LayoutModelRequest) {
   const { request, operation } = input;
   const registeredTemplates = WALLPAPER_TEMPLATES.filter((template) =>
@@ -201,18 +253,8 @@ export function createLayoutPlanMessages(input: LayoutModelRequest) {
 
   return {
     system: [
-      "You plan editable photo wallpaper layouts.",
-      "Return JSON only. Never return markdown or UI instructions.",
-      "Prefer a parameterized recipe. Use a registered template only when refining a registered layout.",
-      "For a recipe candidate set templateId to null. For a registered candidate set recipe to null.",
-      "Recipe supportCount must equal the number of assets minus one.",
-      "When returning three candidates, return exactly one safe, one editorial, and one dynamic recipe profile.",
-      "Use stable generated slot IDs: hero, support-1 onward; layered-collage also starts with background.",
-      "Assign every template slot exactly once.",
-      "Use only supplied asset IDs.",
-      "Do not create canvas coordinates, Fabric objects, polygons, image URLs, or image data.",
-      "Use null when no crop or background override is needed.",
-      `Return exactly ${candidateCount} candidate${candidateCount === 1 ? "" : "s"}.`,
+      ...LAYOUT_PLAN_OUTPUT_RULES,
+      candidateCountRule(candidateCount),
     ].join(" "),
     user: JSON.stringify({
       operation,
@@ -221,23 +263,43 @@ export function createLayoutPlanMessages(input: LayoutModelRequest) {
       style: request.intent.style,
       compositionIntent: request.intent.compositionIntent ?? null,
       assets: request.assets,
-      recipeProfiles: [
-        {
-          profile: "safe",
-          goal: "ordered structure, generous safe areas, conservative cropping",
-        },
-        {
-          profile: "editorial",
-          goal: "asymmetric hierarchy, magazine rhythm, intentional whitespace",
-        },
-        {
-          profile: "dynamic",
-          goal: "layered depth, stronger scale contrast, controlled overlap",
-        },
-      ],
+      recipeProfiles: RECIPE_PROFILE_GOALS,
       registeredTemplates,
       currentLayout:
         operation === "refine" ? (request.currentLayout ?? null) : null,
+      outputSchema: AI_LAYOUT_PLAN_JSON_SCHEMA,
+    }),
+  };
+}
+
+export function createPlanningRequestMessages(planning: PlanningRequest) {
+  const { brief, assets, operation } = planning;
+  const registeredTemplates = WALLPAPER_TEMPLATES.filter((template) =>
+    template.supportedRatios.includes(planningRatio(brief)),
+  );
+  const candidateCount = operation === "refine" ? 1 : 3;
+
+  return {
+    system: [
+      ...LAYOUT_PLAN_OUTPUT_RULES,
+      candidateCountRule(candidateCount),
+      ...BRIEF_PLANNING_RULES,
+      ...ASSET_ANALYSIS_RULES,
+      ...(operation === "refine" ? REFINE_PLANNING_RULES : []),
+    ].join(" "),
+    user: JSON.stringify({
+      version: planning.version,
+      operation,
+      userPrompt: brief.intent.prompt || null,
+      heroAssetId: brief.intent.heroAssetId ?? null,
+      brief,
+      assets,
+      refineInstruction:
+        operation === "refine" ? (planning.refineInstruction ?? null) : null,
+      previousCandidates:
+        operation === "refine" ? (planning.previousCandidates ?? null) : null,
+      recipeProfiles: RECIPE_PROFILE_GOALS,
+      registeredTemplates,
       outputSchema: AI_LAYOUT_PLAN_JSON_SCHEMA,
     }),
   };

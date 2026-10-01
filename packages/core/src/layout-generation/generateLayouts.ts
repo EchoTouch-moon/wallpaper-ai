@@ -14,7 +14,7 @@ import {
 import { OpenAICompatibleLayoutProvider } from "./openAiCompatibleProvider.ts";
 import { generateLayoutRequestSchema } from "./schema.ts";
 import { selectDiverseLayoutCandidates } from "./candidateDiversity.ts";
-import type { LayoutModelProvider } from "./provider.ts";
+import type { LegacyLayoutModelProvider } from "./provider.ts";
 import type {
   GenerateLayoutRequest,
   GenerateLayoutResponse,
@@ -23,7 +23,7 @@ import type {
 export { LayoutGenerationError } from "./generationFallback.ts";
 
 interface GenerateLayoutsDependencies {
-  provider?: LayoutModelProvider;
+  provider?: LegacyLayoutModelProvider;
 }
 
 export function generateLayouts(
@@ -76,7 +76,7 @@ export async function generateLayoutsAsync(
     const provider =
       dependencies.provider ??
       new OpenAICompatibleLayoutProvider(loadLayoutModelConfig());
-    const plan = await provider.generatePlan({
+    const plan = await provider.generateLegacyPlan({
       operation: request.operation,
       request,
     });

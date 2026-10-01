@@ -11,59 +11,17 @@ import {
 import { refineTemplateRecipe } from "./refineTemplateRecipe.ts";
 import { loadLayoutModelConfig } from "./llmConfig.ts";
 import { OpenAICompatibleLayoutProvider } from "./openAiCompatibleProvider.ts";
+import {
+  buildGeneratePlanningRequest,
+  buildRefinePlanningRequest,
+} from "./planningProtocol.ts";
 
-import { planningRatio, type CompositionBrief } from "./compositionBrief.ts";
 import type { LayoutModelProvider } from "./provider.ts";
-import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 import type { WallpaperLayout } from "../types/layout.ts";
 
 interface CompositionGenerationDependencies {
   provider?: LayoutModelProvider;
   environment?: Record<string, string | undefined>;
-}
-
-function legacyRequest(
-  brief: CompositionBrief,
-  assets: ReturnType<typeof compositionGenerationRequestSchema.parse>["assets"],
-  operation: "generate" | "refine" = "generate",
-  currentLayout?: WallpaperLayout,
-  refineInstruction?: string,
-): GenerateLayoutRequest {
-  return {
-    operation,
-    canvas: {
-      width: brief.target.width,
-      height: brief.target.height,
-      ratioId: planningRatio(brief),
-    },
-    intent: {
-      mode: "ai",
-      style: "auto",
-      compositionIntent:
-        brief.intent.hierarchy === "balanced"
-          ? "balanced-collage"
-          : brief.intent.hierarchy === "single-hero"
-            ? "single-hero"
-            : "hero-with-support",
-      safeArea:
-        brief.target.usage === "mobile" ||
-        brief.target.usage === "lock-screen"
-          ? "mobile-top"
-          : "desktop-left",
-      count: operation === "refine" ? 1 : 3,
-      userPrompt:
-        operation === "refine"
-          ? refineInstruction
-          : brief.intent.prompt || undefined,
-    },
-    assets,
-    currentLayout,
-    options: {
-      candidateCount: operation === "refine" ? 1 : 3,
-      allowFallback: true,
-      strictValidation: true,
-    },
-  };
 }
 
 export async function generateCompositionCandidatesAsync(
@@ -79,10 +37,9 @@ export async function generateCompositionCandidatesAsync(
       new OpenAICompatibleLayoutProvider(
         loadLayoutModelConfig(dependencies.environment),
       );
-    const plan = await provider.generatePlan({
-      operation: "generate",
-      request: legacyRequest(request.brief, request.assets),
-    });
+    const plan = await provider.generatePlan(
+      buildGeneratePlanningRequest(request.brief, request.assets),
+    );
     const modelCandidates = plan.candidates.flatMap((candidate, index) => {
       if (!candidate.recipe) {
         return [];
@@ -170,16 +127,14 @@ export async function refineCompositionCandidateAsync(
       new OpenAICompatibleLayoutProvider(
         loadLayoutModelConfig(dependencies.environment),
       );
-    const plan = await provider.generatePlan({
-      operation: "refine",
-      request: legacyRequest(
+    const plan = await provider.generatePlan(
+      buildRefinePlanningRequest(
         request.brief,
         request.assets,
-        "refine",
-        request.currentLayout,
         request.instruction,
+        [request.currentLayout],
       ),
-    });
+    );
     const modelPlan = plan.candidates.find((candidate) => candidate.recipe);
     if (!modelPlan?.recipe) {
       return {

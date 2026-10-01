@@ -5,11 +5,15 @@ import { aiLayoutPlanResponseSchema } from "./aiPlanSchema.ts";
 import {
   AI_LAYOUT_PLAN_JSON_SCHEMA,
   createLayoutPlanMessages,
+  createPlanningRequestMessages,
 } from "./layoutPlanPrompt.ts";
+import { planningRequestV2Schema } from "./planningProtocol.ts";
 import type { LayoutModelConfig } from "./llmConfig.ts";
+import type { PlanningRequest } from "./planningProtocol.ts";
 import type {
   LayoutModelProvider,
   LayoutModelRequest,
+  LegacyLayoutModelProvider,
 } from "./provider.ts";
 
 export type LayoutProviderErrorCode =
@@ -92,7 +96,9 @@ export function classifyProviderError(error: unknown) {
   );
 }
 
-export class OpenAICompatibleLayoutProvider implements LayoutModelProvider {
+export class OpenAICompatibleLayoutProvider
+  implements LayoutModelProvider, LegacyLayoutModelProvider
+{
   private readonly client: OpenAI;
   private readonly config: LayoutModelConfig;
 
@@ -108,8 +114,19 @@ export class OpenAICompatibleLayoutProvider implements LayoutModelProvider {
       });
   }
 
-  async generatePlan(input: LayoutModelRequest) {
-    const messages = createLayoutPlanMessages(input);
+  async generatePlan(planning: PlanningRequest) {
+    const parsed = planningRequestV2Schema.parse(planning);
+    return this.requestPlan(createPlanningRequestMessages(parsed));
+  }
+
+  async generateLegacyPlan(input: LayoutModelRequest) {
+    return this.requestPlan(createLayoutPlanMessages(input));
+  }
+
+  private async requestPlan(messages: {
+    system: string;
+    user: string;
+  }) {
     const responseFormat =
       this.config.responseFormat === "json_schema"
         ? {

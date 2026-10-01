@@ -1,5 +1,6 @@
 export * from "./schema.ts";
 export * from "./compositionBrief.ts";
+export * from "./planningProtocol.ts";
 export * from "./compositionContracts.ts";
 export * from "./compositionApi.ts";
 export * from "./candidateDiversity.ts";
