@@ -401,6 +401,14 @@ function materializePlannedCandidate(
           : "hero-with-support",
     templateSource: options.templateSource,
     templateRecipe: options.templateRecipe,
+    // Finding 4: registered templates carry fixed slot geometry that never
+    // consulted the brief's safe areas (re-run scored 0.0000-0.3098 where
+    // generated candidates scored 1.0). The generated branch must NOT pass
+    // them again — compileTemplateRecipe already avoided these exact
+    // rectangles, and the equal-strip group inset is not idempotent.
+    ...(options.templateSource === "registered"
+      ? { safeAreas: safeAreasForBrief(brief) }
+      : {}),
   });
   const withAssignments = applyPlannedAssignments(
     planned.layout,

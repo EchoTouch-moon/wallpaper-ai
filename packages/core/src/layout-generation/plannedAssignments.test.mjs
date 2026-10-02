@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createDefaultCompositionBrief } from "./compositionBrief.ts";
-import { createCompositionCandidateFromRecipe } from "./generateCompositionCandidates.ts";
+import {
+  createCompositionCandidateFromRecipe,
+  createCompositionCandidateFromTemplate,
+} from "./generateCompositionCandidates.ts";
+import { getTemplate } from "../layout/templates.ts";
 
 function analysis(assetId, color) {
   return {
@@ -144,4 +148,104 @@ test("full model assignments still win verbatim", () => {
   assert.equal(bySlot.get("hero"), "asset_c");
   assert.equal(bySlot.get("support-1"), "asset_b");
   assert.equal(bySlot.get("background"), "asset_a");
+});
+
+// ---------------------------------------------------------------------------
+// Registered candidates consume the brief's safe areas (experiment finding 4):
+// the re-run scored registered triptych candidates 0.0000-0.3098 on safe-area
+// adherence while generated candidates in the same scenarios scored 1.0.
+// ---------------------------------------------------------------------------
+
+function intersectionArea(a, b) {
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+function assertLayoutClearOfSafeAreas(candidate) {
+  assert.ok(candidate.layout.safeAreas.length > 0);
+  for (const item of candidate.layout.items) {
+    for (const area of candidate.layout.safeAreas) {
+      assert.equal(
+        intersectionArea(item, area),
+        0,
+        `${item.slotId} intersects the ${area.type} safe area`,
+      );
+    }
+  }
+}
+
+test("registered desktop template candidates avoid the brief's icon column and dock", () => {
+  const desktopBrief = createDefaultCompositionBrief({
+    ratioId: "16:9",
+    width: 3840,
+    height: 2160,
+    usage: "desktop",
+  });
+  const candidate = createCompositionCandidateFromTemplate(
+    { brief: desktopBrief, assets, candidateCount: 3 },
+    getTemplate("triptych_desktop_equal"),
+    0,
+  );
+
+  assert.equal(candidate.layout.template.source, "registered");
+  assertLayoutClearOfSafeAreas(candidate);
+});
+
+test("registered mobile template candidates avoid the brief's clock and widget bands", () => {
+  const mobileBrief = createDefaultCompositionBrief({
+    ratioId: "9:16",
+    width: 2160,
+    height: 3840,
+    usage: "mobile",
+  });
+  const equal = createCompositionCandidateFromTemplate(
+    { brief: mobileBrief, assets, candidateCount: 3 },
+    getTemplate("triptych_mobile_equal"),
+    0,
+  );
+  const editorial = createCompositionCandidateFromTemplate(
+    { brief: mobileBrief, assets, candidateCount: 3 },
+    getTemplate("triptych_mobile_editorial"),
+    1,
+  );
+
+  assertLayoutClearOfSafeAreas(equal);
+  assertLayoutClearOfSafeAreas(editorial);
+});
+
+test("registered candidates with no brief safe areas keep their fixed geometry", () => {
+  const desktopBrief = {
+    ...createDefaultCompositionBrief({
+      ratioId: "16:9",
+      width: 3840,
+      height: 2160,
+      usage: "desktop",
+    }),
+    constraints: {
+      ...createDefaultCompositionBrief({
+        ratioId: "16:9",
+        width: 3840,
+        height: 2160,
+        usage: "desktop",
+      }).constraints,
+      safeAreas: [],
+    },
+  };
+  const template = getTemplate("triptych_desktop_equal");
+  const candidate = createCompositionCandidateFromTemplate(
+    { brief: desktopBrief, assets, candidateCount: 3 },
+    template,
+    0,
+  );
+
+  // Empty brief safeAreas → the fixed template geometry passes through
+  // untouched (pixel-exact conversion of the registered slots).
+  candidate.layout.items.forEach((item, slotIndex) => {
+    const slot = template.slots[slotIndex];
+    assert.equal(item.x, Math.round(slot.x * 3840));
+    assert.equal(item.y, Math.round(slot.y * 2160));
+    assert.equal(item.width, Math.round(slot.width * 3840));
+    assert.equal(item.height, Math.round(slot.height * 2160));
+  });
 });

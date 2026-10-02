@@ -1,4 +1,8 @@
 import { colorDistance, hexToHsl } from "../image/colorAnalysis.ts";
+import {
+  applySafeAreaAvoidance,
+  type CompileSafeArea,
+} from "./compileTemplateRecipe.ts";
 import { wallpaperLayoutSchema } from "./layoutSchema.ts";
 import type { CanvasSize } from "../types/canvas.ts";
 import type {
@@ -9,7 +13,7 @@ import type {
   WallpaperItem,
   WallpaperTemplate,
 } from "../types/layout.ts";
-import type { WallpaperRatioId } from "../types/wallpaper.ts";
+import type { SafeAreaType, WallpaperRatioId } from "../types/wallpaper.ts";
 import type { TemplateRecipe } from "./templateRecipe.ts";
 import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 
@@ -22,6 +26,16 @@ export interface TemplatePlanInput {
   intent?: CompositionIntent;
   templateSource?: "registered" | "generated";
   templateRecipe?: TemplateRecipe;
+  /**
+   * Optional safe-area rectangles in target pixels — the same caliber the
+   * composition brief produces and the recipe compiler consumes. When
+   * provided, registered-template slots that intersect an area are
+   * translated or shrunk clear of it (experiment finding 4): equal-strip
+   * templates inset as one group so the equal rhythm survives, everything
+   * else runs the per-slot avoidance the generated path already uses.
+   * Absent or empty `safeAreas` plans exactly as before.
+   */
+  safeAreas?: CompileSafeArea[];
 }
 
 function clamp(value: number, minimum = 0, maximum = 1) {
@@ -322,6 +336,206 @@ function createLayoutItem(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Safe-area avoidance for registered templates (experiment finding 4): the
+// fixed slot geometry in templates.ts never consulted the brief's safe areas,
+// so registered candidates scored 0.0000-0.3098 on safe-area adherence while
+// generated candidates in the same scenarios scored 1.0. Areas arrive in
+// target pixels and are normalized here — the same caliber the recipe
+// compiler's `applySafeAreaAvoidance` consumes (evalScoring's
+// `candidateSafeAreaScore` scores that rectangle).
+// ---------------------------------------------------------------------------
+
+type NormalizedSafeArea = {
+  type: SafeAreaType;
+  rect: { x: number; y: number; width: number; height: number };
+};
+
+/** Two slots this close in size count as an equal-strip template. */
+const STRIP_EQUALITY_TOLERANCE = 0.01;
+/** Smallest inner extent the uniform group inset keeps on one axis. */
+const MIN_GROUP_INNER_EXTENT = 0.15;
+const AVOID_EPS = 1e-9;
+
+function intersectsRect(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) {
+  return (
+    a.x + a.width > b.x + AVOID_EPS &&
+    b.x + b.width > a.x + AVOID_EPS &&
+    a.y + a.height > b.y + AVOID_EPS &&
+    b.y + b.height > a.y + AVOID_EPS
+  );
+}
+
+/**
+ * Equal-strip templates (triptych equal/cinematic: every slot shares one
+ * size) keep their rhythm by insetting as a group — a per-slot repair would
+ * collapse only the slot facing the icon column and break the equal thirds.
+ */
+function isUniformStripTemplate(template: WallpaperTemplate) {
+  if (template.slots.length < 2) {
+    return false;
+  }
+  const [first, ...rest] = template.slots;
+  return rest.every(
+    (slot) =>
+      Math.abs(slot.width - first.width) <= STRIP_EQUALITY_TOLERANCE &&
+      Math.abs(slot.height - first.height) <= STRIP_EQUALITY_TOLERANCE,
+  );
+}
+
+function roundStripRect(rect: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) {
+  const round = (value: number) => Number(value.toFixed(5));
+  const width = round(Math.min(1, Math.max(0.01, rect.width)));
+  const height = round(Math.min(1, Math.max(0.01, rect.height)));
+  return {
+    x: round(Math.min(Math.max(rect.x, 0), 1 - width)),
+    y: round(Math.min(Math.max(rect.y, 0), 1 - height)),
+    width,
+    height,
+  };
+}
+
+/** Clamps one axis's insets so the group keeps a usable inner extent. */
+function clampAxisInsets(start: number, end: number): [number, number] {
+  if (1 - start - end >= MIN_GROUP_INNER_EXTENT || start + end <= 0) {
+    return [start, end];
+  }
+  const scale = (1 - MIN_GROUP_INNER_EXTENT) / (start + end);
+  return [start * scale, end * scale];
+}
+
+/**
+ * Insets the whole slot group clear of edge-band safe areas by remapping the
+ * group into the shrunken content rect — an order-preserving affine map, so
+ * equal slots stay equal, gaps stay proportional, and no overlap is
+ * introduced. Center-block areas (subject-protection) are left to the
+ * per-slot fallback in `applyRegisteredSafeAreaAvoidance`.
+ */
+function insetUniformStrip(
+  slots: TemplateSlot[],
+  areas: NormalizedSafeArea[],
+): TemplateSlot[] {
+  const groupLeft = Math.min(...slots.map((slot) => slot.x));
+  const groupTop = Math.min(...slots.map((slot) => slot.y));
+  const groupRight = Math.max(...slots.map((slot) => slot.x + slot.width));
+  const groupBottom = Math.max(...slots.map((slot) => slot.y + slot.height));
+  const group = {
+    x: groupLeft,
+    y: groupTop,
+    width: groupRight - groupLeft,
+    height: groupBottom - groupTop,
+  };
+
+  let insetLeft = 0;
+  let insetRight = 0;
+  let insetTop = 0;
+  let insetBottom = 0;
+  let edgeHit = false;
+  for (const area of areas) {
+    if (!intersectsRect(group, area.rect)) {
+      continue;
+    }
+    if (area.type === "desktop-icons-left") {
+      insetLeft = Math.max(insetLeft, area.rect.x + area.rect.width);
+      edgeHit = true;
+    } else if (area.type === "desktop-icons-right") {
+      insetRight = Math.max(insetRight, 1 - area.rect.x);
+      edgeHit = true;
+    } else if (area.type === "desktop-dock") {
+      insetBottom = Math.max(insetBottom, 1 - area.rect.y);
+      edgeHit = true;
+    } else if (
+      area.type === "mobile-clock" ||
+      area.type === "mobile-widget-center"
+    ) {
+      insetTop = Math.max(insetTop, area.rect.y + area.rect.height);
+      edgeHit = true;
+    }
+  }
+  if (!edgeHit) {
+    return slots;
+  }
+
+  [insetLeft, insetRight] = clampAxisInsets(insetLeft, insetRight);
+  [insetTop, insetBottom] = clampAxisInsets(insetTop, insetBottom);
+  const innerWidth = 1 - insetLeft - insetRight;
+  const innerHeight = 1 - insetTop - insetBottom;
+
+  return slots.map((slot) => ({
+    ...slot,
+    ...roundStripRect({
+      x: insetLeft + slot.x * innerWidth,
+      y: insetTop + slot.y * innerHeight,
+      width: slot.width * innerWidth,
+      height: slot.height * innerHeight,
+    }),
+  }));
+}
+
+/**
+ * Adjusts a registered template's fixed slots against pixel safe areas.
+ * Equal-strip templates inset as a group first; anything still intersecting
+ * after that (or non-strip templates, layered families, center blocks) runs
+ * the recipe compiler's per-slot avoidance, with the full canvas as the
+ * content rect.
+ */
+function applyRegisteredSafeAreaAvoidance(
+  template: WallpaperTemplate,
+  safeAreas: CompileSafeArea[],
+  width: number,
+  height: number,
+): TemplateSlot[] {
+  if (safeAreas.length === 0 || width <= 0 || height <= 0) {
+    return template.slots;
+  }
+  const areas: NormalizedSafeArea[] = safeAreas
+    .filter((area) => area.width > 0 && area.height > 0)
+    .map((area) => ({
+      type: area.type,
+      rect: {
+        x: area.x / width,
+        y: area.y / height,
+        width: area.width / width,
+        height: area.height / height,
+      },
+    }));
+  if (areas.length === 0) {
+    return template.slots;
+  }
+
+  const adjusted = isUniformStripTemplate(template)
+    ? insetUniformStrip(template.slots, areas)
+    : template.slots;
+  const stillIntersects = adjusted.some((slot) =>
+    areas.some((area) =>
+      intersectsRect(
+        { x: slot.x, y: slot.y, width: slot.width, height: slot.height },
+        area.rect,
+      ),
+    ),
+  );
+  if (!stillIntersects) {
+    return adjusted;
+  }
+
+  return applySafeAreaAvoidance(
+    adjusted,
+    { x: 0, y: 0, width: 1, height: 1 },
+    safeAreas,
+    width,
+    height,
+    template.type === "layered-moodboard",
+  );
+}
+
 export function planTemplateCandidate({
   analyses,
   canvasSize,
@@ -331,9 +545,21 @@ export function planTemplateCandidate({
   intent,
   templateSource,
   templateRecipe,
+  safeAreas,
 }: TemplatePlanInput): LayoutCandidate {
-  const assetsBySlot = selectAssetsForSlots(template, analyses);
-  const items = template.slots.map((slot, slotIndex) => {
+  // Slot geometry avoidance (finding 4) happens on a shallow copy: the
+  // registry's templates are shared module state and must stay untouched.
+  const planningTemplate = {
+    ...template,
+    slots: applyRegisteredSafeAreaAvoidance(
+      template,
+      safeAreas ?? [],
+      canvasSize.width,
+      canvasSize.height,
+    ),
+  };
+  const assetsBySlot = selectAssetsForSlots(planningTemplate, analyses);
+  const items = planningTemplate.slots.map((slot, slotIndex) => {
     const analysis = assetsBySlot.get(slot.id);
     if (!analysis) {
       throw new Error(`Missing analysis for template slot: ${slot.id}`);
