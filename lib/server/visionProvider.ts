@@ -44,6 +44,14 @@ export type VisionAnalysisPatch = z.infer<
   typeof visionAnalysisPatchSchema
 >;
 
+// Soft degradations that still produced a usable patch (e.g. the
+// empty-detection retry succeeded on the second call) are surfaced here so
+// callers can record them in their own analysisWarnings channel instead of
+// losing the signal; hard failures keep throwing.
+export interface VisionAnalysisResult extends VisionAnalysisPatch {
+  analysisWarnings: string[];
+}
+
 export interface VisionAnalysisInput {
   buffer: Buffer;
   mimeType: "image/jpeg" | "image/png" | "image/webp";
@@ -53,7 +61,7 @@ export interface VisionAnalysisInput {
 }
 
 export interface VisionProvider {
-  analyze(input: VisionAnalysisInput): Promise<VisionAnalysisPatch>;
+  analyze(input: VisionAnalysisInput): Promise<VisionAnalysisResult>;
 }
 
 interface VisionProviderConfig {
@@ -179,6 +187,13 @@ function isDetectionArray(value: unknown): value is DetectionEntry[] {
   );
 }
 
+// An array response that carries no usable box_2d entry (empty array, or
+// entries that do not match the detection shape) is the intermittently
+// observed relay failure this provider retries once before degrading.
+function isEmptyDetectionArray(value: unknown): boolean {
+  return Array.isArray(value) && !isDetectionArray(value);
+}
+
 // box_2d is [x1, y1, x2, y2] in normalized 0-1 coordinates; clamp so the
 // mapped box always satisfies the normalized box schema.
 function box2dToNormalizedBox([
@@ -205,10 +220,70 @@ function boxArea(box: { width: number; height: number }) {
 
 const FACE_LABEL_KEYWORDS = ["face", "person", "head", "portrait"];
 
+// Conservative contentType derivation thresholds for the detection-array
+// shape, which carries no semantic type of its own.
+const PORTRAIT_ASPECT_MAX = 0.9; // width/height below this reads as a vertical box
+const LANDSCAPE_ASPECT_MIN = 1.1; // width/height above this reads as a horizontal box
+const LANDSCAPE_MIN_SPAN = 0.6; // horizontal box spanning >=60% of the frame width reads as scenery
+
+// Detection arrays cannot express contentType directly, so derive it
+// conservatively: a labelled face always wins (portrait), then the subject
+// box aspect ratio decides (vertical -> portrait, wide full-span ->
+// landscape, wide partial -> object); anything ambiguous stays "unknown".
+function deriveContentType(
+  subjectBox: { width: number; height: number } | null,
+  faces: unknown[],
+): VisionAnalysisPatch["contentType"] {
+  if (faces.length > 0) {
+    return "portrait";
+  }
+  if (!subjectBox) {
+    return "unknown";
+  }
+  const aspect = subjectBox.width / subjectBox.height;
+  if (aspect < PORTRAIT_ASPECT_MAX) {
+    return "portrait";
+  }
+  if (aspect > LANDSCAPE_ASPECT_MIN) {
+    return subjectBox.width >= LANDSCAPE_MIN_SPAN ? "landscape" : "object";
+  }
+  return "unknown";
+}
+
+// Existing derivation kept as the base (subject -> hero+background, otherwise
+// background), extended so a derived portrait subject also fits collage use.
+function deriveBestUse(
+  contentType: VisionAnalysisPatch["contentType"],
+  subjectBox: { width: number; height: number } | null,
+): VisionAnalysisPatch["bestUse"] {
+  const uses: VisionAnalysisPatch["bestUse"] = subjectBox
+    ? ["hero", "background"]
+    : ["background"];
+  if (subjectBox && contentType === "portrait") {
+    uses.push("portrait-collage");
+  }
+  return uses;
+}
+
+// Existing derivation kept as the base (faces -> low, otherwise medium),
+// extended so a derived portrait without a labelled face is still treated
+// cautiously: a tall subject may be an undetected person, so cropping risk
+// stays "low" rather than assuming medium safety.
+function deriveCropSafety(
+  contentType: VisionAnalysisPatch["contentType"],
+  faces: unknown[],
+): VisionAnalysisPatch["cropSafety"] {
+  if (faces.length > 0 || contentType === "portrait") {
+    return "low";
+  }
+  return "medium";
+}
+
 // Maps a native detection array onto the semantic patch contract. The largest
 // subject-labelled box becomes subjectBox; remaining face/person boxes become
-// faces (max 12). Fields the detection shape cannot express fall back to
-// neutral values so the merged analysis still validates.
+// faces (max 12). The detection shape cannot express styleTags, so they stay
+// empty; contentType/bestUse/cropSafety are derived conservatively from the
+// mapped boxes so the merged analysis still validates.
 function detectionArrayToVisionPatch(
   detections: DetectionEntry[],
 ): VisionAnalysisPatch {
@@ -247,14 +322,15 @@ function detectionArrayToVisionPatch(
       }
     : { x: 0.5, y: 0.5 };
 
+  const contentType = deriveContentType(subjectBox, faces);
   return {
-    contentType: "unknown",
+    contentType,
     faces,
     subjectBox,
     saliencyCenter,
     styleTags: [],
-    bestUse: subjectBox ? ["hero", "background"] : ["background"],
-    cropSafety: faces.length > 0 ? "low" : "medium",
+    bestUse: deriveBestUse(contentType, subjectBox),
+    cropSafety: deriveCropSafety(contentType, faces),
   };
 }
 
@@ -262,6 +338,22 @@ function extractJsonValue(text: string) {
   const trimmed = text.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
   const source = fenced ?? trimmed;
+  // A top-level detection array must be extracted whole: brace-slicing a
+  // single-entry array would silently return its inner object instead.
+  if (source.startsWith("[")) {
+    const arrayEnd = source.lastIndexOf("]");
+    if (arrayEnd > 0) {
+      try {
+        return JSON.parse(source.slice(0, arrayEnd + 1)) as unknown;
+      } catch (error) {
+        throw new Error(
+          `Vision model returned unparseable JSON: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
   const objectStart = source.indexOf("{");
   const objectEnd = source.lastIndexOf("}");
   if (objectStart >= 0 && objectEnd > objectStart) {
@@ -302,6 +394,22 @@ function parseVisionResponse(value: unknown): VisionAnalysisPatch {
   return visionAnalysisPatchSchema.parse(value);
 }
 
+// Relays that ignore response_format only see the text prompt, so the output
+// contract is spelled out there too: a single complete object, never a bare
+// detection array, with every semantic field the patch schema requires.
+const OUTPUT_CONTRACT_INSTRUCTION =
+  "Answer with a single JSON object (never an array) containing contentType, faces, subjectBox, saliencyCenter, styleTags (up to 8 concise style tags), bestUse, and cropSafety, matching the provided JSON schema.";
+
+// Appended on the one retry after an empty detection array, per the observed
+// relay failure mode where the model returns no box at all when uncertain.
+const SALIENT_SUBJECT_RETRY_INSTRUCTION =
+  "You must output the single most salient subject box even if uncertain.";
+
+const EMPTY_DETECTION_RETRY_NOTICE =
+  "Vision detection array had no usable box_2d entries; retried once with an explicit salient-subject-box requirement";
+const EMPTY_DETECTION_AFTER_RETRY_MESSAGE =
+  "Vision model returned an array without usable box_2d detection entries after one retry with an explicit salient-subject-box requirement";
+
 export class OpenAICompatibleVisionProvider implements VisionProvider {
   private readonly client: OpenAI;
   private readonly config: VisionProviderConfig;
@@ -318,7 +426,39 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
       });
   }
 
-  async analyze(input: VisionAnalysisInput) {
+  async analyze(input: VisionAnalysisInput): Promise<VisionAnalysisResult> {
+    const firstContent = await this.requestVisionCompletion(input);
+    const firstValue = extractJsonValue(firstContent);
+    if (!isEmptyDetectionArray(firstValue)) {
+      return { ...parseVisionResponse(firstValue), analysisWarnings: [] };
+    }
+
+    // Observed relay behavior: the model answers with an array that carries
+    // no usable detection entry. Retry exactly once with an explicit demand
+    // for the most salient subject box; only a second empty array degrades
+    // (throws, so callers fall back to basic analysis with a warning).
+    const retryContent = await this.requestVisionCompletion(
+      input,
+      SALIENT_SUBJECT_RETRY_INSTRUCTION,
+    );
+    const retryValue = extractJsonValue(retryContent);
+    if (isEmptyDetectionArray(retryValue)) {
+      throw new Error(EMPTY_DETECTION_AFTER_RETRY_MESSAGE);
+    }
+    return {
+      ...parseVisionResponse(retryValue),
+      analysisWarnings: [EMPTY_DETECTION_RETRY_NOTICE],
+    };
+  }
+
+  private async requestVisionCompletion(
+    input: VisionAnalysisInput,
+    extraInstruction?: string,
+  ) {
+    const instructions = [
+      OUTPUT_CONTRACT_INSTRUCTION,
+      ...(extraInstruction ? [extraInstruction] : []),
+    ].join(" ");
     const completion = await this.client.chat.completions.create({
       model: this.config.model,
       messages: [
@@ -332,13 +472,14 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
           content: [
             {
               type: "text",
-              text: JSON.stringify({
-                task:
-                  "Find composition-safe semantic regions for automatic wallpaper layout.",
-                width: input.width,
-                height: input.height,
-                basicAnalysis: input.basicAnalysis,
-              }),
+              text:
+                JSON.stringify({
+                  task:
+                    "Find composition-safe semantic regions for automatic wallpaper layout.",
+                  width: input.width,
+                  height: input.height,
+                  basicAnalysis: input.basicAnalysis,
+                }) + `\n${instructions}`,
             },
             {
               type: "image_url",
@@ -363,7 +504,7 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
     if (!content) {
       throw new Error("Vision model returned an empty response");
     }
-    return parseVisionResponse(extractJsonValue(content));
+    return content;
   }
 }
 
@@ -390,11 +531,14 @@ export function createVisionProviderFromEnvironment(
 
 export function mergeVisionAnalysis(
   basic: ImageAssetAnalysis,
-  patch: VisionAnalysisPatch,
+  patch: VisionAnalysisPatch & { analysisWarnings?: string[] },
 ): ImageAssetAnalysis {
+  // analysisWarnings is the provider's observability channel, not a semantic
+  // analysis field: strip it so the merged analysis stays schema-clean.
+  const { analysisWarnings: _providerWarnings, ...semantic } = patch;
   return {
     ...basic,
-    ...patch,
-    subjectBox: patch.subjectBox ?? undefined,
+    ...semantic,
+    subjectBox: semantic.subjectBox ?? undefined,
   };
 }
