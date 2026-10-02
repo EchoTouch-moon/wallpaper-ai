@@ -33,8 +33,6 @@ const SOURCE_LABELS: Record<GenerateLayoutSource, string> = {
   template: "模板",
 };
 
-type LayoutSession = NonNullable<GenerateLayoutResponse["session"]>;
-
 function getStrategyScore(candidate: LayoutCandidate) {
   const note = candidate.layout.notes.find((item) =>
     item.startsWith("Mock AI strategy:"),
@@ -80,15 +78,11 @@ interface TemplatePreviewBarProps {
 
 export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [approvingCandidateId, setApprovingCandidateId] = useState<string | null>(
-    null,
-  );
   const [generationMode, setGenerationMode] = useState<"ai" | "local">("ai");
   const [refinePrompt, setRefinePrompt] = useState("");
   const assets = useEditorStore((state) => state.assets);
   const candidates = useEditorStore((state) => state.candidates);
   const candidateSource = useEditorStore((state) => state.candidateSource);
-  const layoutSession = useEditorStore((state) => state.layoutSession);
   const canvasSize = useEditorStore((state) => state.canvasSize);
   const ratioId = useEditorStore((state) => state.ratioId);
   const compositionIntent = useEditorStore((state) => state.compositionIntent);
@@ -101,7 +95,7 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
   const setNotice = useEditorStore((state) => state.setNotice);
   const { applyLayout } = useEditorCommands();
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
-  const isBusy = isGenerating || approvingCandidateId !== null;
+  const isBusy = isGenerating;
 
   const generate = async (operation: "generate" | "refine" = "generate") => {
     if (assets.length < 3 || isBusy) {
@@ -159,11 +153,7 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
         setLayoutSession(result.session ?? null);
         setNotice(
           result.warnings?.[0] ??
-            (operation === "refine"
-              ? "已生成布局修改候选"
-              : result.session
-                ? "请选择候选并确认应用"
-                : "已生成 AI 排版候选"),
+            (operation === "refine" ? "已生成布局修改候选" : "已生成 AI 排版候选"),
         );
         if (operation === "refine") {
           setRefinePrompt("");
@@ -181,49 +171,7 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
   };
 
   const applyCandidate = async (candidate: LayoutCandidate) => {
-    if (!layoutSession || layoutSession.status !== "awaiting_approval") {
-      await applyLayout(candidate.layout);
-      return;
-    }
-    if (isBusy) {
-      return;
-    }
-
-    setApprovingCandidateId(candidate.id);
-    try {
-      const response = await fetch(
-        `/api/layout-sessions/${encodeURIComponent(layoutSession.id)}/approve`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ candidateId: candidate.id }),
-        },
-      );
-      const result = (await response.json().catch(() => null)) as
-        | { candidateId?: string; session?: LayoutSession; error?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error(result?.error ?? "Layout approval request failed");
-      }
-      if (
-        result?.candidateId !== candidate.id ||
-        result.session?.status !== "approved"
-      ) {
-        throw new Error("Layout approval response did not match the candidate");
-      }
-
-      setLayoutSession(result.session);
-      await applyLayout(candidate.layout);
-      setNotice("已确认并应用 LangGraph 排版方案");
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? `排版确认失败：${error.message}`
-          : "排版确认失败，请稍后重试",
-      );
-    } finally {
-      setApprovingCandidateId(null);
-    }
+    await applyLayout(candidate.layout);
   };
 
   return (
@@ -233,9 +181,7 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
           <h2 className="text-sm font-semibold tracking-tight text-gray-900">智能排版</h2>
           <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider font-mono">
             {candidates.length > 0
-              ? layoutSession?.status === "awaiting_approval"
-                ? "确认后应用排版"
-                : "选择排版方向"
+              ? "选择排版方向"
               : `照片已就绪: ${assets.length}/3`}
           </span>
         </div>
@@ -284,8 +230,6 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
       >
         {isGenerating
           ? "正在生成排版..."
-          : approvingCandidateId
-            ? "正在确认候选..."
           : generationMode === "ai"
             ? "生成 AI 排版"
             : "生成本地排版"}
@@ -319,10 +263,7 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
       ) : null}
       
       {candidates.length > 0 ? (
-        <div
-          className="flex flex-col gap-4 overflow-y-auto pr-1"
-          aria-busy={approvingCandidateId !== null}
-        >
+        <div className="flex flex-col gap-4 overflow-y-auto pr-1">
           {candidates.map((candidate) => {
             const strategyScore = getStrategyScore(candidate);
             const templateType = candidate.layout.template?.type ?? "";
@@ -335,7 +276,7 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
               key={candidate.id}
               disabled={isBusy}
               onClick={() => void applyCandidate(candidate)}
-              aria-label={`${layoutSession?.status === "awaiting_approval" ? "确认并应用" : "应用"}排版: ${candidate.label}`}
+              aria-label={`应用排版: ${candidate.label}`}
               title={candidate.reason}
             >
               {/* Preview Box */}
@@ -383,13 +324,6 @@ export function TemplatePreviewBar({ onClose }: TemplatePreviewBarProps) {
                 {candidateSource ? (
                   <span className="w-fit rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
                     {SOURCE_LABELS[candidateSource]}
-                  </span>
-                ) : null}
-                {layoutSession?.status === "awaiting_approval" ? (
-                  <span className="w-fit rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                    {approvingCandidateId === candidate.id
-                      ? "正在确认…"
-                      : "待服务确认（可恢复）"}
                   </span>
                 ) : null}
                 <p className="text-[11px] leading-4 text-gray-500">
