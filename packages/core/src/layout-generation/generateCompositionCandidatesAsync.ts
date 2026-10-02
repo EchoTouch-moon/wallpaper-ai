@@ -16,7 +16,10 @@ import {
   loadVisionPlanningConfig,
   type VisionPlanningModelConfig,
 } from "./llmConfig.ts";
-import { OpenAICompatibleLayoutProvider } from "./openAiCompatibleProvider.ts";
+import {
+  LayoutProviderError,
+  OpenAICompatibleLayoutProvider,
+} from "./openAiCompatibleProvider.ts";
 import {
   buildGeneratePlanningRequest,
   buildRefinePlanningRequest,
@@ -39,6 +42,13 @@ interface CompositionGenerationDependencies {
  * the existing warnings mechanism. The degradation is recorded on the caller's
  * `planningWarnings` array BEFORE the retry, so it stays observable even when
  * the text-only retry fails into the deterministic fallback tier.
+ *
+ * Tier 1.5 (leftover issue ③, intermittent invalid plan JSON): an
+ * `invalid_response` failure is a malformed payload, not a dead endpoint — the
+ * vision model intermittently emits non-contract JSON that a second identical
+ * call frequently fixes. Before degrading to text-only, the multimodal request
+ * is retried once AS-IS; the retry outcome is recorded in warnings either way
+ * (a silent retry here would make intermittent contract misses unobservable).
  */
 async function generatePlanWithTextFallback(
   provider: LayoutModelProvider,
@@ -53,6 +63,25 @@ async function generatePlanWithTextFallback(
   try {
     return await provider.generatePlan(planning);
   } catch (error) {
+    if (
+      error instanceof LayoutProviderError &&
+      error.code === "invalid_response"
+    ) {
+      try {
+        const retriedPlan = await provider.generatePlan(planning);
+        planningWarnings.push(
+          "Vision planning returned invalid plan JSON; one identical retry recovered the multimodal plan.",
+        );
+        return retriedPlan;
+      } catch (retryError) {
+        planningWarnings.push(
+          `Vision planning retry failed; falling back to text-only planning. (${
+            retryError instanceof Error ? retryError.message : "unknown error"
+          })`,
+        );
+        return provider.generatePlan(buildTextOnlyRequest());
+      }
+    }
     planningWarnings.push(
       `Vision planning failed; fell back to text-only planning. (${
         error instanceof Error ? error.message : "unknown error"

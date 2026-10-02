@@ -7,6 +7,7 @@ import {
   generateCompositionCandidatesAsync,
   refineCompositionCandidateAsync,
 } from "./generateCompositionCandidatesAsync.ts";
+import { LayoutProviderError } from "./openAiCompatibleProvider.ts";
 
 function analysis(assetId, color) {
   return {
@@ -529,6 +530,84 @@ test("degrades the refinement path from vision planning to text-only planning", 
     response.candidate.layout.items.find((item) => item.role === "hero")
       .assetId,
     "asset_b",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Leftover issue ③ (intermittent invalid plan JSON): an invalid_response
+// failure is retried once as an identical multimodal call BEFORE degrading to
+// text-only; the retry outcome stays observable through warnings either way.
+// ---------------------------------------------------------------------------
+
+test("retries the identical multimodal call once when the vision plan JSON is invalid, then succeeds", async () => {
+  const calls = [];
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3, assetContent },
+    {
+      environment: visionGateOnEnvironment,
+      provider: {
+        async generatePlan(input) {
+          calls.push(input);
+          if (calls.length === 1) {
+            throw new LayoutProviderError(
+              "invalid_response",
+              "Layout model returned invalid plan JSON",
+            );
+          }
+          return modelPlanCandidates();
+        },
+      },
+    },
+  );
+
+  // Passing path: the retry is the SAME multimodal request (assetContent
+  // preserved), the multimodal plan is used, and no text-only call happens.
+  assert.equal(response.source, "ai");
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].assetContent, assetContent);
+  assert.deepEqual(calls[1].assetContent, assetContent);
+  assert.deepEqual(response.warnings, [
+    "Vision planning returned invalid plan JSON; one identical retry recovered the multimodal plan.",
+  ]);
+  assert.equal(
+    response.candidates.every((item) => item.usedFallback),
+    false,
+  );
+});
+
+test("degrades to text-only planning when the invalid plan JSON retry fails again", async () => {
+  const calls = [];
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3, assetContent },
+    {
+      environment: visionGateOnEnvironment,
+      provider: {
+        async generatePlan(input) {
+          calls.push(input);
+          if (input.assetContent?.length) {
+            throw new LayoutProviderError(
+              "invalid_response",
+              "Layout model returned invalid plan JSON",
+            );
+          }
+          return modelPlanCandidates();
+        },
+      },
+    },
+  );
+
+  // Degradation path: multimodal → identical multimodal retry → text-only.
+  assert.equal(response.source, "ai");
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[0].assetContent, assetContent);
+  assert.deepEqual(calls[1].assetContent, assetContent);
+  assert.equal(calls[2].assetContent, undefined);
+  assert.deepEqual(response.warnings, [
+    "Vision planning retry failed; falling back to text-only planning. (Layout model returned invalid plan JSON)",
+  ]);
+  assert.equal(
+    response.candidates.every((item) => item.usedFallback),
+    false,
   );
 });
 
