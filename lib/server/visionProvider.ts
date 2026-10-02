@@ -950,13 +950,15 @@ export function createVisionProviderFromEnvironment(
   if (!apiKey || !model) {
     return null;
   }
-  const timeout = Number(environment.VISION_TIMEOUT_MS ?? "20000");
+  // The contour-aware prompt (24x24 grid + polygon + face boxes) makes real
+  // vision calls take 60s+ on fast vision models; 20s never completes.
+  const timeout = Number(environment.VISION_TIMEOUT_MS ?? "90000");
   return new OpenAICompatibleVisionProvider({
     apiKey,
     baseURL: environment.LLM_BASE_URL?.trim() || undefined,
     model,
     timeoutMs:
-      Number.isFinite(timeout) && timeout >= 1_000 ? timeout : 20_000,
+      Number.isFinite(timeout) && timeout >= 1_000 ? timeout : 90_000,
   });
 }
 
