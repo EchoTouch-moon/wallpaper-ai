@@ -488,3 +488,297 @@ test("absent or inert semantic knobs compile byte-identically", () => {
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// Safe-area avoidance (experiment findings 3/4)
+// ---------------------------------------------------------------------------
+
+function intersectionArea(a, b) {
+  const width =
+    Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height =
+    Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+// Pixel rectangles — the same caliber `safeAreasForBrief` produces and
+// `evalScoring.candidateSafeAreaScore` scores against.
+function mobileSafeAreas(width, height) {
+  return [
+    {
+      type: "mobile-clock",
+      x: Math.round(width * 0.17),
+      y: Math.round(height * 0.035),
+      width: Math.round(width * 0.66),
+      height: Math.round(height * 0.17),
+    },
+    {
+      type: "mobile-widget-center",
+      x: Math.round(width * 0.12),
+      y: Math.round(height * 0.25),
+      width: Math.round(width * 0.76),
+      height: Math.round(height * 0.18),
+    },
+  ];
+}
+
+function dockSafeArea(width, height) {
+  return {
+    type: "desktop-dock",
+    x: Math.round(width * 0.22),
+    y: Math.round(height * 0.9),
+    width: Math.round(width * 0.56),
+    height: Math.round(height * 0.1),
+  };
+}
+
+function normalizedAreas(areas, width, height) {
+  return areas.map((area) => ({
+    x: area.x / width,
+    y: area.y / height,
+    width: area.width / width,
+    height: area.height / height,
+  }));
+}
+
+function assertSlotsClearAndPacked(template, areas) {
+  for (const slot of template.slots) {
+    assert.ok(slot.x >= 0 && slot.y >= 0);
+    assert.ok(slot.x + slot.width <= 1.00001);
+    assert.ok(slot.y + slot.height <= 1.00001);
+    for (const area of areas) {
+      assert.equal(
+        intersectionArea(slot, area),
+        0,
+        `${slot.id} intersects the ${area.type ?? "safe"} area`,
+      );
+    }
+  }
+  for (let i = 0; i < template.slots.length; i += 1) {
+    for (let j = i + 1; j < template.slots.length; j += 1) {
+      assert.equal(
+        intersectionArea(template.slots[i], template.slots[j]),
+        0,
+        `${template.slots[i].id} overlaps ${template.slots[j].id}`,
+      );
+    }
+  }
+}
+
+const MOBILE = { id: "9:16", width: 2160, height: 3840 };
+
+test("mobile safe areas: bottom hero clears the clock and widget bands", () => {
+  const areas = mobileSafeAreas(MOBILE.width, MOBILE.height);
+  const template = compileTemplateRecipe({
+    recipe: {
+      ...DEFAULT_TEMPLATE_RECIPES[0],
+      heroPosition: "bottom",
+      margin: 0.25,
+      supportCount: 2,
+    },
+    ratioId: MOBILE.id,
+    width: MOBILE.width,
+    height: MOBILE.height,
+    assetCount: 3,
+    safeAreas: areas,
+  });
+
+  const normalized = normalizedAreas(areas, MOBILE.width, MOBILE.height);
+  assertSlotsClearAndPacked(template, normalized);
+
+  // the hero starts below the widget band's bottom edge …
+  const widgetBottom =
+    normalized[1].y + normalized[1].height;
+  const hero = heroSlotOf(template);
+  assert.ok(hero.y >= widgetBottom - 1e-6);
+  // … and stays pinned to the bottom of the content rect
+  const contentBottom = 1 - 0.25 - 0.005;
+  assert.ok(Math.abs(hero.y + hero.height - contentBottom) < 1e-5);
+});
+
+test("mobile safe areas: a top hero translates below the band without covering supports", () => {
+  const areas = mobileSafeAreas(MOBILE.width, MOBILE.height);
+  const template = compileTemplateRecipe({
+    recipe: {
+      ...DEFAULT_TEMPLATE_RECIPES[0],
+      heroPosition: "top",
+      supportCount: 2,
+    },
+    ratioId: MOBILE.id,
+    width: MOBILE.width,
+    height: MOBILE.height,
+    assetCount: 3,
+    safeAreas: areas,
+  });
+
+  const normalized = normalizedAreas(areas, MOBILE.width, MOBILE.height);
+  assertSlotsClearAndPacked(template, normalized);
+
+  // the hero moved below the deepest band bottom (widget band) …
+  const widgetBottom = normalized[1].y + normalized[1].height;
+  const hero = heroSlotOf(template);
+  assert.ok(hero.y >= widgetBottom - 1e-6);
+  // … and supports still sit below the hero without being shoved around
+  for (const slot of template.slots) {
+    if (slot.role === "hero") {
+      continue;
+    }
+    assert.ok(slot.y >= hero.y + hero.height - 1e-6);
+  }
+});
+
+test("desktop dock caps slot heights at the dock's top edge", () => {
+  const dock = dockSafeArea(LANDSCAPE.width, LANDSCAPE.height);
+  const template = compileTemplateRecipe({
+    recipe: { ...DEFAULT_TEMPLATE_RECIPES[0], supportCount: 3 },
+    ratioId: LANDSCAPE.id,
+    width: LANDSCAPE.width,
+    height: LANDSCAPE.height,
+    assetCount: 4,
+    safeAreas: [dock],
+  });
+
+  const normalized = normalizedAreas([dock], LANDSCAPE.width, LANDSCAPE.height)[0];
+  assertSlotsClearAndPacked(template, [normalized]);
+
+  // every slot horizontally overlapping the dock respects the height cap
+  const dockTop = dock.y / LANDSCAPE.height;
+  for (const slot of template.slots) {
+    const horizontalOverlap =
+      Math.min(slot.x + slot.width, normalized.x + normalized.width) -
+      Math.max(slot.x, normalized.x);
+    if (horizontalOverlap > 0) {
+      assert.ok(
+        slot.y + slot.height <= dockTop + 1e-6,
+        `${slot.id} extends into the dock strip`,
+      );
+    }
+  }
+});
+
+test("desktop icon column shrinks the facing slot edge clear of the column", () => {
+  const width = LANDSCAPE.width;
+  const height = LANDSCAPE.height;
+  const iconsLeft = {
+    type: "desktop-icons-left",
+    x: 0,
+    y: Math.round(height * 0.05),
+    width: Math.round(width * 0.18),
+    height: Math.round(height * 0.82),
+  };
+  const template = compileTemplateRecipe({
+    recipe: { ...DEFAULT_TEMPLATE_RECIPES[0], heroPosition: "left", supportCount: 1 },
+    ratioId: LANDSCAPE.id,
+    width,
+    height,
+    assetCount: 2,
+    safeAreas: [iconsLeft],
+  });
+
+  const normalized = normalizedAreas([iconsLeft], width, height)[0];
+  assertSlotsClearAndPacked(template, [normalized]);
+  // the left-aligned hero was pushed right of the icon column
+  const hero = heroSlotOf(template);
+  assert.ok(hero.x >= normalized.x + normalized.width - 1e-6);
+});
+
+test("balanced-mosaic respects heroPosition: left pins the hero to the edge", () => {
+  const template = compileTemplateRecipe({
+    recipe: {
+      ...DEFAULT_TEMPLATE_RECIPES[1],
+      heroPosition: "left",
+      supportCount: 2,
+    },
+    ratioId: LANDSCAPE.id,
+    width: LANDSCAPE.width,
+    height: LANDSCAPE.height,
+    assetCount: 3,
+  });
+
+  const hero = heroSlotOf(template);
+  const inset = DEFAULT_TEMPLATE_RECIPES[1].margin; // soft-avoid keeps the plain margin
+  // hero hugs the content's left edge at full height …
+  assert.ok(Math.abs(hero.x - inset) < 1e-5);
+  assert.ok(Math.abs(hero.y - inset) < 1e-5);
+  assert.ok(Math.abs(hero.height - (1 - inset * 2)) < 1e-5);
+  // … with the heroShare width …
+  const contentWidth = 1 - inset * 2;
+  assert.ok(Math.abs(hero.width - 0.48 * contentWidth) < 1e-5);
+  // … and every support stacked on the opposite side
+  for (const slot of template.slots) {
+    if (slot.role === "hero") {
+      continue;
+    }
+    assert.ok(
+      slot.x >= hero.x + hero.width + DEFAULT_TEMPLATE_RECIPES[1].gap - 1e-5,
+    );
+  }
+  assertSlotsClearAndPacked(template, []);
+});
+
+test("default compile is unchanged without safe areas", () => {
+  const input = (extra) => ({
+    recipe: { ...DEFAULT_TEMPLATE_RECIPES[1], supportCount: 3 },
+    ratioId: LANDSCAPE.id,
+    width: LANDSCAPE.width,
+    height: LANDSCAPE.height,
+    assetCount: 4,
+    ...extra,
+  });
+  // absent and empty safeAreas compile identically …
+  assert.deepEqual(
+    compileTemplateRecipe(input({ safeAreas: [] })),
+    compileTemplateRecipe(input()),
+  );
+  // … and the centered mosaic keeps its centered-hero geometry
+  const template = compileTemplateRecipe(input());
+  const hero = heroSlotOf(template);
+  const inset = DEFAULT_TEMPLATE_RECIPES[1].margin;
+  const leftGap = hero.x - inset;
+  const rightGap = 1 - inset - (hero.x + hero.width);
+  assert.ok(Math.abs(leftGap - rightGap) < 1e-5);
+  assert.ok(leftGap > 0.1);
+});
+
+test("recipes accept the bottom hero position and the mobile margin floor", () => {
+  const recipe = templateRecipeSchema.parse({
+    ...DEFAULT_TEMPLATE_RECIPES[0],
+    heroPosition: "bottom",
+    margin: 0.25,
+  });
+  assert.equal(recipe.heroPosition, "bottom");
+  assert.equal(recipe.margin, 0.25);
+});
+
+test("strip slot IDs stay contiguous across the hero position (planner contract)", () => {
+  // The planner prompt fixes generated slot IDs as "hero, support-1 onward";
+  // a portrait strip must not skip the support number the hero occupies
+  // (support-1, hero, support-2 — never support-3, which no model assigns).
+  for (const family of ["stacked-story", "triptych"]) {
+    for (const assetCount of [3, 4, 5]) {
+      const template = compileTemplateRecipe({
+        recipe: {
+          ...DEFAULT_TEMPLATE_RECIPES[1],
+          family,
+          supportCount: assetCount - 1,
+        },
+        ratioId: "9:16",
+        width: 2160,
+        height: 3840,
+        assetCount,
+        safeAreas: [],
+      });
+      const ids = template.slots.map((slot) => slot.id);
+      const supports = ids
+        .filter((id) => id.startsWith("support-"))
+        .map((id) => Number(id.slice("support-".length)))
+        .sort((a, b) => a - b);
+      assert.deepEqual(
+        supports,
+        Array.from({ length: supports.length }, (_, index) => index + 1),
+        `${family} with ${assetCount} assets must use contiguous support IDs (got ${ids.join(", ")})`,
+      );
+      assert.equal(ids.filter((id) => id === "hero").length, 1);
+    }
+  }
+});

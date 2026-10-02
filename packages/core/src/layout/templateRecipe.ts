@@ -70,12 +70,15 @@ export const templateRecipeSchema = z
       "left",
       "right",
       "top",
+      "bottom",
       "center",
       "background",
     ]),
     heroShare: z.number().min(0.32).max(0.76),
     supportCount: z.number().int().min(1).max(5),
-    margin: z.number().min(0).max(0.12),
+    // Ceiling 0.3 (not 0.12): mobile briefs with a center widget band raise
+    // the margin floor to 0.25 so the content area starts below the band.
+    margin: z.number().min(0).max(0.3),
     gap: z.number().min(0).max(0.06),
     cornerRadius: z.number().min(0).max(0.08),
     rhythm: z.enum(["ordered", "asymmetric", "layered"]),

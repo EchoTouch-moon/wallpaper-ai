@@ -14,6 +14,7 @@ import type {
   TemplateType,
   WallpaperTemplate,
 } from "../types/layout.ts";
+import type { SafeAreaType } from "../types/wallpaper.ts";
 
 type Rect = {
   x: number;
@@ -25,6 +26,20 @@ type Rect = {
 type FocalPoint = { x: number; y: number };
 
 type CoverCrop = Rect & { focalPoint: FocalPoint };
+
+/**
+ * A safe-area rectangle supplied to the compiler in target pixels — the same
+ * unit and caliber as layout `safeAreas` (what evalScoring's
+ * `candidateSafeAreaScore` measures item overlap against). The compiler
+ * normalizes by `width` / `height` before applying avoidance.
+ */
+export interface CompileSafeArea {
+  type: SafeAreaType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface CompileTemplateRecipeInput {
   recipe: TemplateRecipe;
@@ -45,6 +60,21 @@ export interface CompileTemplateRecipeInput {
    * compiled crop, preserving the downstream cover-crop default.
    */
   slotAssignments?: Record<string, string>;
+  /**
+   * Optional safe-area rectangles in target pixels. When provided, slots
+   * that intersect an area are translated or shrunk to clear it:
+   *
+   * - side columns (desktop-icons-left/right) shrink the facing edge;
+   * - desktop-dock caps the slot-height upper bound at the dock's top;
+   * - horizontal bands (mobile-clock, mobile-widget-center,
+   *   subject-protection) translate the hero below the band bottom and
+   *   pull support tops below it;
+   * - adjusted slots stay inside the content rect and gap-style slots
+   *   stay mutually non-overlapping.
+   *
+   * Absent or empty `safeAreas` compiles exactly as before.
+   */
+  safeAreas?: CompileSafeArea[];
 }
 
 /**
@@ -278,20 +308,35 @@ function heroGridSlots(
   let hero: Rect;
   let supportRect: Rect;
 
-  if (portrait || position === "top") {
+  if (portrait || position === "top" || position === "bottom") {
     const heroHeight = content.height * recipe.heroShare;
-    hero = {
-      x: content.x,
-      y: content.y,
-      width: content.width,
-      height: heroHeight,
-    };
-    supportRect = {
-      x: content.x,
-      y: content.y + heroHeight + gap,
-      width: content.width,
-      height: content.height - heroHeight - gap,
-    };
+    const heroAtBottom = position === "bottom";
+    hero = heroAtBottom
+      ? {
+          x: content.x,
+          y: content.y + content.height - heroHeight,
+          width: content.width,
+          height: heroHeight,
+        }
+      : {
+          x: content.x,
+          y: content.y,
+          width: content.width,
+          height: heroHeight,
+        };
+    supportRect = heroAtBottom
+      ? {
+          x: content.x,
+          y: content.y,
+          width: content.width,
+          height: content.height - heroHeight - gap,
+        }
+      : {
+          x: content.x,
+          y: content.y + heroHeight + gap,
+          width: content.width,
+          height: content.height - heroHeight - gap,
+        };
   } else {
     const heroWidth = content.width * recipe.heroShare;
     const heroOnRight = position === "right";
@@ -331,6 +376,18 @@ function balancedMosaicSlots(
   portrait: boolean,
 ) {
   if (count === 2) {
+    return heroGridSlots(content, count, recipe, portrait);
+  }
+  // An explicit edge anchor (left/right/top/bottom) pins the hero to that
+  // edge with the supports stacked on the opposite side — the hero-grid
+  // geometry. center (and the legacy background default) keeps the
+  // centered mosaic structure below, unchanged.
+  if (
+    recipe.heroPosition === "left" ||
+    recipe.heroPosition === "right" ||
+    recipe.heroPosition === "top" ||
+    recipe.heroPosition === "bottom"
+  ) {
     return heroGridSlots(content, count, recipe, portrait);
   }
   const gap = recipe.gap;
@@ -411,9 +468,15 @@ function stripSlots(
     portrait ? 1 : count,
   );
   const heroIndex = Math.floor(count / 2);
+  // Slot IDs stay contiguous across the hero position: the planner prompt
+  // contract is "hero, support-1 onward", so the strip layout must not skip a
+  // support number where the hero sits (a 3-slot strip compiles to
+  // support-1, hero, support-2 — never support-3, which no model assigns).
   return rects.map((rect, index) =>
     slot(
-      index === heroIndex ? "hero" : `support-${index + 1}`,
+      index === heroIndex
+        ? "hero"
+        : `support-${index < heroIndex ? index + 1 : index}`,
       rect,
       index === heroIndex ? "hero" : "support",
       index,
@@ -599,6 +662,406 @@ function applySlotIntents(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Safe-area avoidance (experiment findings 3/4): slot rectangles that cross a
+// reserved safe area are translated or shrunk clear of it. Areas arrive in
+// target pixels and are normalized against the compile width/height — the
+// same rectangle caliber `evalScoring.candidateSafeAreaScore` scores against.
+// ---------------------------------------------------------------------------
+
+const AVOID_EPS = 1e-9;
+/** Smallest slot extent (normalized) the avoidance keeps when shrinking. */
+const MIN_AVOIDED_SLOT_EXTENT = 0.03;
+/** Separation kept between slots re-packed by overlap resolution. */
+const OVERLAP_SEPARATION = 0.008;
+
+type NormalizedSafeArea = { type: SafeAreaType; rect: Rect };
+
+function intersectsRect(a: Rect, b: Rect): boolean {
+  return (
+    a.x + a.width > b.x + AVOID_EPS &&
+    b.x + b.width > a.x + AVOID_EPS &&
+    a.y + a.height > b.y + AVOID_EPS &&
+    b.y + b.height > a.y + AVOID_EPS
+  );
+}
+
+function clampIntoContent(rect: Rect, content: Rect): Rect {
+  const width = Math.min(Math.max(rect.width, 0.01), content.width);
+  const height = Math.min(Math.max(rect.height, 0.01), content.height);
+  return {
+    x: clamp(rect.x, content.x, content.x + content.width - width),
+    y: clamp(rect.y, content.y, content.y + content.height - height),
+    width,
+    height,
+  };
+}
+
+function sameRect(a: Rect, b: Rect): boolean {
+  return (
+    a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+  );
+}
+
+function overlapsAnyRect(rect: Rect, others: Rect[]): boolean {
+  return others.some((other) => intersectsRect(rect, other));
+}
+
+/** Hero places first (it anchors the composition), supports follow in slot
+ * order, the layered background goes last. */
+function placementRank(slot: TemplateSlot): number {
+  if (slot.role === "hero") {
+    return 0;
+  }
+  return slot.role === "background" ? 2 : 1;
+}
+
+/** Icon columns: shrink the facing edge out of the column; translate when the
+ * remaining width would be too narrow. */
+function avoidSideColumn(
+  rect: Rect,
+  area: Rect,
+  content: Rect,
+  side: "left" | "right",
+): Rect {
+  if (side === "left") {
+    const areaRight = area.x + area.width;
+    if (rect.x + rect.width - areaRight >= MIN_AVOIDED_SLOT_EXTENT) {
+      return clampIntoContent(
+        { ...rect, x: areaRight, width: rect.x + rect.width - areaRight },
+        content,
+      );
+    }
+    return clampIntoContent({ ...rect, x: areaRight }, content);
+  }
+  const areaLeft = area.x;
+  if (areaLeft - rect.x >= MIN_AVOIDED_SLOT_EXTENT) {
+    return clampIntoContent({ ...rect, width: areaLeft - rect.x }, content);
+  }
+  return clampIntoContent({ ...rect, x: areaLeft - rect.width }, content);
+}
+
+/** Dock strip: cap the slot's height upper bound at the dock's top edge. */
+function avoidDockStrip(rect: Rect, area: Rect, content: Rect): Rect {
+  const dockTop = area.y;
+  if (rect.y < dockTop - MIN_AVOIDED_SLOT_EXTENT) {
+    return clampIntoContent({ ...rect, height: dockTop - rect.y }, content);
+  }
+  // The slot starts inside the dock strip: keep its bottom at the dock top.
+  const height = Math.min(rect.height, dockTop - content.y);
+  return clampIntoContent({ ...rect, y: dockTop - height, height }, content);
+}
+
+/** Horizontal bands (clock / widget / subject-protection): the hero (and the
+ * layered background) translate fully below the band bottom edge; supports
+ * pull their top edge below the band, keeping the bottom edge. Every step is
+ * bounded by `obstacles` (already-placed rects plus the original lanes of
+ * slots not repaired yet), and when the space below the band cannot host the
+ * slot, it falls back to the space above the band — clearing a band never
+ * trades the safe-area hit for a slot overlap. */
+function avoidBlockBand(
+  rect: Rect,
+  area: Rect,
+  content: Rect,
+  heroic: boolean,
+  obstacles: Rect[],
+): Rect {
+  const bandBottom = area.y + area.height;
+  const contentBottom = content.y + content.height;
+  let roomBottom = contentBottom;
+  for (const obstacle of obstacles) {
+    if (
+      obstacle.y - OVERLAP_SEPARATION < roomBottom &&
+      obstacle.y >= bandBottom - AVOID_EPS &&
+      obstacle.x + obstacle.width > rect.x + AVOID_EPS &&
+      rect.x + rect.width > obstacle.x + AVOID_EPS
+    ) {
+      roomBottom = obstacle.y - OVERLAP_SEPARATION;
+    }
+  }
+  if (heroic) {
+    if (bandBottom + rect.height <= roomBottom + AVOID_EPS) {
+      return clampIntoContent({ ...rect, y: bandBottom }, content);
+    }
+    if (roomBottom - bandBottom >= MIN_AVOIDED_SLOT_EXTENT) {
+      return clampIntoContent(
+        { ...rect, y: bandBottom, height: roomBottom - bandBottom },
+        content,
+      );
+    }
+    return fitAboveBand(rect, area, content, obstacles) ?? rect;
+  }
+  // Supports: pull the top edge below the band, keeping the bottom edge,
+  // but never past a slot occupying the space under the band.
+  const cappedHeight = rect.y + rect.height - bandBottom;
+  if (cappedHeight >= MIN_AVOIDED_SLOT_EXTENT) {
+    const height = Math.min(cappedHeight, roomBottom - bandBottom);
+    if (height >= MIN_AVOIDED_SLOT_EXTENT) {
+      return clampIntoContent({ ...rect, y: bandBottom, height }, content);
+    }
+  }
+  const translated = { ...rect, y: bandBottom };
+  if (
+    bandBottom + rect.height <= roomBottom + AVOID_EPS &&
+    !overlapsAnyRect(translated, obstacles)
+  ) {
+    return clampIntoContent(translated, content);
+  }
+  if (roomBottom - bandBottom >= MIN_AVOIDED_SLOT_EXTENT) {
+    return clampIntoContent(
+      { ...rect, y: bandBottom, height: roomBottom - bandBottom },
+      content,
+    );
+  }
+  return fitAboveBand(rect, area, content, obstacles) ?? rect;
+}
+
+/** Last-resort placement for band avoidance: fit the slot into the space
+ * between the content top and the band's top edge, if that space is tall
+ * enough and free of other slots. */
+function fitAboveBand(
+  rect: Rect,
+  area: Rect,
+  content: Rect,
+  obstacles: Rect[],
+): Rect | null {
+  const height = Math.min(
+    rect.height,
+    area.y - OVERLAP_SEPARATION - content.y,
+  );
+  if (height < MIN_AVOIDED_SLOT_EXTENT) {
+    return null;
+  }
+  const candidate = {
+    ...rect,
+    y: area.y - OVERLAP_SEPARATION - height,
+    height,
+  };
+  if (overlapsAnyRect(candidate, obstacles)) {
+    return null;
+  }
+  return clampIntoContent(candidate, content);
+}
+
+function avoidAllAreas(
+  rect: Rect,
+  role: TemplateSlot["role"],
+  content: Rect,
+  areas: NormalizedSafeArea[],
+  obstacles: Rect[],
+): Rect {
+  const heroic = role === "hero" || role === "background";
+  // Side columns first (horizontal repair), then the dock cap, then block
+  // bands ordered by ascending bottom edge so the deepest band's pull wins.
+  const ordered = [
+    ...areas.filter(
+      (area) =>
+        area.type === "desktop-icons-left" || area.type === "desktop-icons-right",
+    ),
+    ...areas.filter((area) => area.type === "desktop-dock"),
+    ...areas
+      .filter(
+        (area) =>
+          area.type !== "desktop-icons-left" &&
+          area.type !== "desktop-icons-right" &&
+          area.type !== "desktop-dock",
+      )
+      .sort(
+        (left, right) =>
+          left.rect.y +
+          left.rect.height -
+          (right.rect.y + right.rect.height),
+      ),
+  ];
+
+  let current = { ...rect };
+  for (let round = 0; round <= ordered.length; round += 1) {
+    let changed = false;
+    for (const area of ordered) {
+      if (!intersectsRect(current, area.rect)) {
+        continue;
+      }
+      let next: Rect;
+      if (area.type === "desktop-icons-left") {
+        next = avoidSideColumn(current, area.rect, content, "left");
+      } else if (area.type === "desktop-icons-right") {
+        next = avoidSideColumn(current, area.rect, content, "right");
+      } else if (area.type === "desktop-dock") {
+        next = avoidDockStrip(current, area.rect, content);
+      } else {
+        next = avoidBlockBand(current, area.rect, content, heroic, obstacles);
+      }
+      if (!sameRect(next, current)) {
+        current = next;
+        changed = true;
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+  return current;
+}
+
+/** Moves `rect` out of `obstacle`, preferring below, then above, then
+ * shrinking into whichever side still has room inside the content rect. */
+function pushAwayFrom(rect: Rect, obstacle: Rect, content: Rect): Rect {
+  const below = obstacle.y + obstacle.height + OVERLAP_SEPARATION;
+  const contentBottom = content.y + content.height;
+  if (below + rect.height <= contentBottom + AVOID_EPS) {
+    return clampIntoContent({ ...rect, y: below }, content);
+  }
+  const above = obstacle.y - OVERLAP_SEPARATION - rect.height;
+  if (above >= content.y - AVOID_EPS) {
+    return clampIntoContent({ ...rect, y: above }, content);
+  }
+  const belowHeight = contentBottom - below;
+  if (belowHeight >= MIN_AVOIDED_SLOT_EXTENT) {
+    return clampIntoContent({ ...rect, y: below, height: belowHeight }, content);
+  }
+  const aboveHeight = obstacle.y - OVERLAP_SEPARATION - content.y;
+  if (aboveHeight >= MIN_AVOIDED_SLOT_EXTENT) {
+    return clampIntoContent(
+      { ...rect, y: content.y, height: aboveHeight },
+      content,
+    );
+  }
+  return rect;
+}
+
+/**
+ * Resolves overlaps that the avoidance *introduced*. Pairs that already
+ * overlapped before adjustment keep overlapping (layered-collage semantics);
+ * callers skip this entirely for the layered family, whose overlap is the
+ * design.
+ */
+function resolveIntroducedOverlaps(
+  slots: TemplateSlot[],
+  previous: Rect[],
+  adjusted: Rect[],
+  content: Rect,
+): Rect[] {
+  const result = adjusted.map((rect) => ({ ...rect }));
+  for (let index = 0; index < slots.length; index += 1) {
+    if (slots[index].role === "background") {
+      continue;
+    }
+    for (let guard = 0; guard < slots.length; guard += 1) {
+      let moved = false;
+      for (let other = 0; other < index; other += 1) {
+        if (slots[other].role === "background") {
+          continue;
+        }
+        if (!intersectsRect(result[index], result[other])) {
+          continue;
+        }
+        if (intersectsRect(previous[index], previous[other])) {
+          continue;
+        }
+        result[index] = pushAwayFrom(result[index], result[other], content);
+        moved = true;
+      }
+      if (!moved) {
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Applies safe-area avoidance to compiled slots. Slots are repaired in
+ * placement order — hero first, then supports, background last — and each
+ * repair sees the already-placed slots as obstacles, so clearing a band never
+ * trades a safe-area hit for a slot overlap. Layered-collage keeps its
+ * deliberate hero/support/background overlaps (only safe-area intersections
+ * are repaired); gap-style families additionally re-separate slots whose
+ * overlap the repair still introduced.
+ */
+export function applySafeAreaAvoidance(
+  slots: TemplateSlot[],
+  content: Rect,
+  safeAreas: CompileSafeArea[],
+  width: number,
+  height: number,
+  layered: boolean,
+): TemplateSlot[] {
+  if (safeAreas.length === 0 || width <= 0 || height <= 0) {
+    return slots;
+  }
+  const areas: NormalizedSafeArea[] = safeAreas
+    .filter((area) => area.width > 0 && area.height > 0)
+    .map((area) => ({
+      type: area.type,
+      rect: {
+        x: area.x / width,
+        y: area.y / height,
+        width: area.width / width,
+        height: area.height / height,
+      },
+    }));
+  if (areas.length === 0) {
+    return slots;
+  }
+
+  const previous = slots.map((slot) => ({
+    x: slot.x,
+    y: slot.y,
+    width: slot.width,
+    height: slot.height,
+  }));
+  const placementOrder = slots
+    .map((slot, index) => ({ slot, index }))
+    .sort((left, right) => {
+      const rankDelta = placementRank(left.slot) - placementRank(right.slot);
+      if (rankDelta !== 0) {
+        return rankDelta;
+      }
+      // Supports place bottom-up: lower rows anchor first, so rows pushed
+      // below a band shrink against them instead of shoving them around.
+      return previous[right.index].y - previous[left.index].y;
+    });
+  const adjusted: Rect[] = new Array(slots.length);
+  const placed: Rect[] = [];
+  for (const { slot, index } of placementOrder) {
+    // The layered family overlaps by design, and the background sits behind
+    // everything: neither dodges other slots, only the safe areas. Gap-style
+    // slots dodge the already-placed (adjusted) rects plus the original
+    // lanes of slots not placed yet — a band translate must not land on a
+    // support that has not been repaired itself.
+    const obstacles =
+      layered || slot.role === "background"
+        ? []
+        : [
+            ...placed,
+            ...placementOrder
+              .slice(placed.length)
+              .filter(
+                (pending) =>
+                  pending.index !== index &&
+                  pending.slot.role !== "background",
+              )
+              .map((pending) => previous[pending.index]),
+          ];
+    adjusted[index] = avoidAllAreas(
+      previous[index],
+      slot.role,
+      content,
+      areas,
+      obstacles,
+    );
+    placed.push(adjusted[index]);
+  }
+  const resolved = layered
+    ? adjusted
+    : resolveIntroducedOverlaps(slots, previous, adjusted, content);
+
+  return slots.map((current, index) => ({
+    ...current,
+    ...roundBox(resolved[index]),
+  }));
+}
+
 export function compileTemplateRecipe(
   input: CompileTemplateRecipeInput,
 ): WallpaperTemplate {
@@ -631,6 +1094,16 @@ export function compileTemplateRecipe(
   }
 
   slots = applySlotIntents(slots, recipe, input);
+  if (input.safeAreas && input.safeAreas.length > 0) {
+    slots = applySafeAreaAvoidance(
+      slots,
+      content,
+      input.safeAreas,
+      input.width,
+      input.height,
+      recipe.family === "layered-collage",
+    );
+  }
 
   return wallpaperTemplateSchema.parse({
     id: `generated_${recipe.profile}_${recipe.family}_${input.ratioId.replace(/[^a-z0-9]+/gi, "_")}_${count}`,

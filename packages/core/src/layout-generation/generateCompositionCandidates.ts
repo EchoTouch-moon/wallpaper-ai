@@ -131,9 +131,18 @@ function recipeForBrief(
   const avoidsRightIcons = brief.constraints.safeAreas.includes(
     "desktop-icons-right",
   );
+  // Mobile mapping (experiment findings 3/4): a clock strip at the top means
+  // the hero belongs at the bottom of the screen, below the clock/widget
+  // bands; a center widget band additionally raises the margin floor so the
+  // content area starts at the band's top edge.
+  const avoidsClock = brief.constraints.safeAreas.includes("mobile-clock");
+  const hasCenterWidget = brief.constraints.safeAreas.includes(
+    "mobile-widget-center",
+  );
   const lockScreen = brief.target.usage === "lock-screen";
-  const heroPosition =
-    source.profile === "safe" && avoidsLeftIcons
+  const heroPosition = avoidsClock
+    ? "bottom"
+    : source.profile === "safe" && avoidsLeftIcons
       ? "right"
       : source.profile === "safe" && avoidsRightIcons
         ? "left"
@@ -150,6 +159,7 @@ function recipeForBrief(
     dense: { margin: -0.008, gap: -0.004, heroShare: -0.03 },
   } as const;
   const adjustment = densityAdjustments[brief.intent.density];
+  const marginFloor = hasCenterWidget ? 0.25 : 0;
 
   return templateRecipeSchema.parse({
     ...source,
@@ -160,7 +170,7 @@ function recipeForBrief(
     heroPosition,
     heroShare: Math.min(0.76, Math.max(0.32, source.heroShare + adjustment.heroShare)),
     supportCount: assetCount - 1,
-    margin: Math.min(0.12, Math.max(0, source.margin + adjustment.margin)),
+    margin: Math.min(0.3, Math.max(marginFloor, source.margin + adjustment.margin)),
     gap: Math.min(0.06, Math.max(0, source.gap + adjustment.gap)),
     safeAreaPolicy:
       brief.constraints.safeAreas.length > 0 ? "avoid" : "soft-avoid",
