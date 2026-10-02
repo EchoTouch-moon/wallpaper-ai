@@ -51,9 +51,9 @@ function parseTimeout(value: string | undefined) {
     return 30_000;
   }
   const timeout = Number(value);
-  if (!Number.isInteger(timeout) || timeout < 1_000 || timeout > 120_000) {
+  if (!Number.isInteger(timeout) || timeout < 1_000 || timeout > 300_000) {
     throw new LayoutModelConfigurationError(
-      "LLM_TIMEOUT_MS must be an integer between 1000 and 120000",
+      "LLM_TIMEOUT_MS must be an integer between 1000 and 300000",
     );
   }
   return timeout;
