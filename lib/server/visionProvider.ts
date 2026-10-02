@@ -157,16 +157,149 @@ const VISION_RESPONSE_SCHEMA = {
   },
 } as const;
 
-function extractJsonObject(text: string) {
+// Native detection entries returned by relays that ignore response_format,
+// e.g. glm-5v-turbo: { box_2d: [x1, y1, x2, y2], label: "background" }.
+const detectionEntrySchema = z.object({
+  box_2d: z.tuple([
+    z.number(),
+    z.number(),
+    z.number(),
+    z.number(),
+  ]),
+  label: z.string(),
+});
+
+type DetectionEntry = z.infer<typeof detectionEntrySchema>;
+
+function isDetectionArray(value: unknown): value is DetectionEntry[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((entry) => detectionEntrySchema.safeParse(entry).success)
+  );
+}
+
+// box_2d is [x1, y1, x2, y2] in normalized 0-1 coordinates; clamp so the
+// mapped box always satisfies the normalized box schema.
+function box2dToNormalizedBox([
+  x1,
+  y1,
+  x2,
+  y2,
+]: DetectionEntry["box_2d"]): { x: number; y: number; width: number; height: number } {
+  const left = Math.min(Math.max(x1, 0), 1);
+  const top = Math.min(Math.max(y1, 0), 1);
+  const right = Math.min(Math.max(x2, 0), 1);
+  const bottom = Math.min(Math.max(y2, 0), 1);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(right - left, 0),
+    height: Math.max(bottom - top, 0),
+  };
+}
+
+function boxArea(box: { width: number; height: number }) {
+  return box.width * box.height;
+}
+
+const FACE_LABEL_KEYWORDS = ["face", "person", "head", "portrait"];
+
+// Maps a native detection array onto the semantic patch contract. The largest
+// subject-labelled box becomes subjectBox; remaining face/person boxes become
+// faces (max 12). Fields the detection shape cannot express fall back to
+// neutral values so the merged analysis still validates.
+function detectionArrayToVisionPatch(
+  detections: DetectionEntry[],
+): VisionAnalysisPatch {
+  const labelled = detections
+    .map((detection) => ({
+      label: detection.label.trim().toLowerCase(),
+      box: box2dToNormalizedBox(detection.box_2d),
+    }))
+    .filter((entry) => entry.box.width > 0 && entry.box.height > 0);
+
+  const subjectCandidates = labelled.filter(
+    (entry) => entry.label.includes("subject"),
+  );
+  const subjectEntry =
+    subjectCandidates.length > 0
+      ? subjectCandidates.reduce((largest, entry) =>
+          boxArea(entry.box) > boxArea(largest.box) ? entry : largest,
+        )
+      : null;
+
+  const faces = labelled
+    .filter(
+      (entry) =>
+        entry !== subjectEntry &&
+        FACE_LABEL_KEYWORDS.some((keyword) => entry.label.includes(keyword)),
+    )
+    .sort((a, b) => boxArea(b.box) - boxArea(a.box))
+    .slice(0, 12)
+    .map((entry) => entry.box);
+
+  const subjectBox = subjectEntry ? subjectEntry.box : null;
+  const saliencyCenter = subjectBox
+    ? {
+        x: subjectBox.x + subjectBox.width / 2,
+        y: subjectBox.y + subjectBox.height / 2,
+      }
+    : { x: 0.5, y: 0.5 };
+
+  return {
+    contentType: "unknown",
+    faces,
+    subjectBox,
+    saliencyCenter,
+    styleTags: [],
+    bestUse: subjectBox ? ["hero", "background"] : ["background"],
+    cropSafety: faces.length > 0 ? "low" : "medium",
+  };
+}
+
+function extractJsonValue(text: string) {
   const trimmed = text.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1];
   const source = fenced ?? trimmed;
-  const start = source.indexOf("{");
-  const end = source.lastIndexOf("}");
-  if (start < 0 || end < start) {
-    throw new Error("Vision model returned no JSON object");
+  const objectStart = source.indexOf("{");
+  const objectEnd = source.lastIndexOf("}");
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    try {
+      return JSON.parse(source.slice(objectStart, objectEnd + 1)) as unknown;
+    } catch {
+      // An array payload makes the brace slice span multiple top-level
+      // values; fall through and retry with bracket delimiters.
+    }
   }
-  return JSON.parse(source.slice(start, end + 1)) as unknown;
+  const arrayStart = source.indexOf("[");
+  const arrayEnd = source.lastIndexOf("]");
+  if (arrayStart >= 0 && arrayEnd > arrayStart) {
+    try {
+      return JSON.parse(source.slice(arrayStart, arrayEnd + 1)) as unknown;
+    } catch (error) {
+      throw new Error(
+        `Vision model returned unparseable JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  throw new Error(
+    "Vision model returned no JSON object or detection array",
+  );
+}
+
+function parseVisionResponse(value: unknown): VisionAnalysisPatch {
+  if (isDetectionArray(value)) {
+    return visionAnalysisPatchSchema.parse(detectionArrayToVisionPatch(value));
+  }
+  if (Array.isArray(value)) {
+    throw new Error(
+      "Vision model returned an array without usable box_2d detection entries",
+    );
+  }
+  return visionAnalysisPatchSchema.parse(value);
 }
 
 export class OpenAICompatibleVisionProvider implements VisionProvider {
@@ -230,7 +363,7 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
     if (!content) {
       throw new Error("Vision model returned an empty response");
     }
-    return visionAnalysisPatchSchema.parse(extractJsonObject(content));
+    return parseVisionResponse(extractJsonValue(content));
   }
 }
 

@@ -214,6 +214,21 @@ async function analyzeBuffer(
   return analyzePixels({ assetId, width, height, pixels });
 }
 
+const VISION_FALLBACK_WARNING_PREFIX =
+  "Semantic vision analysis was unavailable; basic image analysis was used.";
+
+// Keeps the recorded warning single-line and bounded even when the cause is a
+// multi-line ZodError dump, so the degradation stays observable but compact.
+function summarizeVisionFailure(error: unknown) {
+  const message = (
+    error instanceof Error ? error.message : String(error)
+  )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+  return message ? ` Reason: ${message}` : "";
+}
+
 async function enrichWithVision(
   buffer: Buffer,
   basicAnalysis: ReturnType<typeof analyzePixels>,
@@ -248,12 +263,12 @@ async function enrichWithVision(
       source: "vision" as const,
       warnings: [] as string[],
     };
-  } catch {
+  } catch (error) {
     return {
       analysis: basicAnalysis,
       source: "basic" as const,
       warnings: [
-        "Semantic vision analysis was unavailable; basic image analysis was used.",
+        `${VISION_FALLBACK_WARNING_PREFIX}.${summarizeVisionFailure(error)}`,
       ],
     };
   }
