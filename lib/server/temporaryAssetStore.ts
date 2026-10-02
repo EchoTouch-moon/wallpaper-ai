@@ -219,14 +219,19 @@ const VISION_FALLBACK_WARNING_PREFIX =
 
 // Keeps the recorded warning single-line and bounded even when the cause is a
 // multi-line ZodError dump, so the degradation stays observable but compact.
+// Zod puts the offending received value at the END of the message, so a plain
+// head-truncation would cut it off; keep both ends instead.
 function summarizeVisionFailure(error: unknown) {
   const message = (
     error instanceof Error ? error.message : String(error)
   )
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 240);
-  return message ? ` Reason: ${message}` : "";
+    .trim();
+  const bounded =
+    message.length > 240
+      ? `${message.slice(0, 140)} …[truncated]… ${message.slice(-90)}`
+      : message;
+  return bounded ? ` Reason: ${bounded}` : "";
 }
 
 async function enrichWithVision(

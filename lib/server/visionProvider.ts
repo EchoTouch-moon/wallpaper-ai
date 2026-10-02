@@ -44,6 +44,26 @@ export type VisionAnalysisPatch = z.infer<
   typeof visionAnalysisPatchSchema
 >;
 
+const CONTENT_TYPE_VALUES: readonly string[] = [
+  "portrait",
+  "landscape",
+  "anime",
+  "pet",
+  "architecture",
+  "object",
+  "text-heavy",
+  "unknown",
+];
+
+const BEST_USE_VALUES: readonly string[] = [
+  "hero",
+  "background",
+  "support",
+  "triptych",
+  "portrait-collage",
+  "irregular-collage",
+];
+
 // Soft degradations that still produced a usable patch (e.g. the
 // empty-detection retry succeeded on the second call) are surfaced here so
 // callers can record them in their own analysisWarnings channel instead of
@@ -391,7 +411,178 @@ function parseVisionResponse(value: unknown): VisionAnalysisPatch {
       "Vision model returned an array without usable box_2d detection entries",
     );
   }
-  return visionAnalysisPatchSchema.parse(value);
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Vision model returned neither an object nor an array");
+  }
+  const normalized = normalizeObjectPatch(value as Record<string, unknown>);
+  if (normalized === null) {
+    throw new Error(
+      "Vision model returned an object without usable semantic fields",
+    );
+  }
+  return visionAnalysisPatchSchema.parse(normalized);
+}
+
+// Models asked for the full object still drift from the JSON schema in
+// predictable ways (subjectBox/saliencyCenter as bare coordinate arrays,
+// free-form contentType strings, comma-joined styleTags). Normalize those
+// shapes before the strict parse; anything unrecognizable falls back to the
+// same conservative derivations the detection-array path uses, so a usable
+// patch survives instead of degrading the whole analysis to basic.
+function coerceNormalizedBox(value: unknown) {
+  if (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every((n) => typeof n === "number" && Number.isFinite(n))
+  ) {
+    return box2dToNormalizedBox(value as DetectionEntry["box_2d"]);
+  }
+  if (typeof value === "object" && value !== null) {
+    const candidate = value as Record<string, unknown>;
+    if (
+      typeof candidate.x === "number" &&
+      typeof candidate.y === "number" &&
+      typeof candidate.width === "number" &&
+      typeof candidate.height === "number" &&
+      [candidate.x, candidate.y, candidate.width, candidate.height].every((n) =>
+        Number.isFinite(n),
+      )
+    ) {
+      // Clamp each field directly: routing a valid box through x + width
+      // would introduce floating-point drift (0.1 + 0.2) and break the
+      // byte-identical passthrough of already-valid patches.
+      return {
+        x: Math.min(Math.max(candidate.x, 0), 1),
+        y: Math.min(Math.max(candidate.y, 0), 1),
+        width: Math.min(Math.max(candidate.width, 0), 1),
+        height: Math.min(Math.max(candidate.height, 0), 1),
+      };
+    }
+  }
+  return null;
+}
+
+function coerceNormalizedPoint(value: unknown) {
+  if (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((n) => typeof n === "number" && Number.isFinite(n))
+  ) {
+    const [x, y] = value as [number, number];
+    return {
+      x: Math.min(Math.max(x, 0), 1),
+      y: Math.min(Math.max(y, 0), 1),
+    };
+  }
+  if (typeof value === "object" && value !== null) {
+    const candidate = value as Record<string, unknown>;
+    if (
+      typeof candidate.x === "number" &&
+      typeof candidate.y === "number" &&
+      Number.isFinite(candidate.x) &&
+      Number.isFinite(candidate.y)
+    ) {
+      return {
+        x: Math.min(Math.max(candidate.x, 0), 1),
+        y: Math.min(Math.max(candidate.y, 0), 1),
+      };
+    }
+  }
+  return null;
+}
+
+function normalizeObjectPatch(value: Record<string, unknown>) {
+  const faces = (Array.isArray(value.faces) ? value.faces : [])
+    .map((entry) => coerceNormalizedBox(entry))
+    .filter(
+      (box): box is NonNullable<ReturnType<typeof coerceNormalizedBox>> =>
+        box !== null && box.width > 0 && box.height > 0,
+    )
+    .slice(0, 12);
+
+  const subjectBoxCoerced = coerceNormalizedBox(value.subjectBox);
+  const subjectBox =
+    subjectBoxCoerced !== null &&
+    subjectBoxCoerced.width > 0 &&
+    subjectBoxCoerced.height > 0
+      ? subjectBoxCoerced
+      : null;
+
+  const contentTypeRaw =
+    typeof value.contentType === "string"
+      ? value.contentType.trim().toLowerCase()
+      : "";
+  const contentTypeValid = [...CONTENT_TYPE_VALUES].includes(contentTypeRaw);
+  const contentType = contentTypeValid
+    ? (contentTypeRaw as VisionAnalysisPatch["contentType"])
+    : deriveContentType(subjectBox, faces);
+
+  const styleTagsSource = Array.isArray(value.styleTags)
+    ? value.styleTags
+    : typeof value.styleTags === "string"
+      ? value.styleTags.split(/[,;，；]/)
+      : [];
+  const styleTags = styleTagsSource
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0 && tag.length <= 32)
+    .slice(0, 8);
+
+  const bestUseRaw = Array.isArray(value.bestUse)
+    ? value.bestUse.filter(
+        (use): use is string =>
+          typeof use === "string" && BEST_USE_VALUES.includes(use),
+      )
+    : [];
+
+  const cropSafetyRaw =
+    typeof value.cropSafety === "string"
+      ? value.cropSafety.trim().toLowerCase()
+      : "";
+  const cropSafetyValid = (["high", "medium", "low"] as const).includes(
+    cropSafetyRaw as "high" | "medium" | "low",
+  );
+
+  // Salvage requires at least one usable signal; an object with none of the
+  // semantic fields present is a failed response, not a patch to merge.
+  if (
+    subjectBox === null &&
+    faces.length === 0 &&
+    !contentTypeValid &&
+    styleTags.length === 0 &&
+    bestUseRaw.length === 0 &&
+    !cropSafetyValid
+  ) {
+    return null;
+  }
+
+  const saliencyCenter =
+    coerceNormalizedPoint(value.saliencyCenter) ??
+    (subjectBox
+      ? {
+          x: subjectBox.x + subjectBox.width / 2,
+          y: subjectBox.y + subjectBox.height / 2,
+        }
+      : { x: 0.5, y: 0.5 });
+
+  const bestUse =
+    bestUseRaw.length > 0
+      ? (bestUseRaw.slice(0, 6) as VisionAnalysisPatch["bestUse"])
+      : deriveBestUse(contentType, subjectBox);
+
+  const cropSafety = cropSafetyValid
+    ? (cropSafetyRaw as VisionAnalysisPatch["cropSafety"])
+    : deriveCropSafety(contentType, faces);
+
+  return {
+    contentType,
+    faces,
+    subjectBox,
+    saliencyCenter,
+    styleTags,
+    bestUse,
+    cropSafety,
+  };
 }
 
 // Relays that ignore response_format only see the text prompt, so the output
