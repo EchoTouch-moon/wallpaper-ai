@@ -7,6 +7,28 @@ import {
 } from "../../packages/core/src/layout/layoutSchema.ts";
 import type { ImageAssetAnalysis } from "../../packages/core/src/types/layout.ts";
 
+// Subject contour contract: a 24x24 occupancy grid (1 = subject cell) plus an
+// optional simplified polygon for single-subject images.
+const CONTOUR_GRID_SIZE = 24;
+const CONTOUR_GRID_CELLS = CONTOUR_GRID_SIZE * CONTOUR_GRID_SIZE; // 576
+const CONTOUR_MAX_POLYGON_VERTICES = 48;
+const CONTOUR_GRID_PATTERN = new RegExp(`^[01]{${CONTOUR_GRID_CELLS}}$`);
+
+const subjectContourSchema = z
+  .object({
+    grid: z.string().regex(CONTOUR_GRID_PATTERN),
+    gridSize: z.literal(CONTOUR_GRID_SIZE),
+    subjectPolygon: z
+      .array(normalizedPointSchema)
+      .min(3)
+      .max(CONTOUR_MAX_POLYGON_VERTICES)
+      .optional(),
+    subjectAreaRatio: z.number().min(0).max(1),
+  })
+  .strict();
+
+export type SubjectContour = z.infer<typeof subjectContourSchema>;
+
 const visionAnalysisPatchSchema = z
   .object({
     contentType: z.enum([
@@ -21,6 +43,7 @@ const visionAnalysisPatchSchema = z
     ]),
     faces: z.array(normalizedBoxSchema).max(12),
     subjectBox: normalizedBoxSchema.nullable(),
+    subjectContour: subjectContourSchema.optional(),
     saliencyCenter: normalizedPointSchema,
     styleTags: z.array(z.string().trim().min(1).max(32)).max(8),
     bestUse: z
@@ -102,6 +125,7 @@ const VISION_RESPONSE_SCHEMA = {
     "styleTags",
     "bestUse",
     "cropSafety",
+    "subjectContour",
   ],
   properties: {
     contentType: {
@@ -181,6 +205,46 @@ const VISION_RESPONSE_SCHEMA = {
     cropSafety: {
       type: "string",
       enum: ["high", "medium", "low"],
+    },
+    // Optional at the semantic level: strict JSON-schema mode requires every
+    // property to be listed, so optionality is expressed as anyOf + null.
+    subjectContour: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["grid", "gridSize", "subjectPolygon", "subjectAreaRatio"],
+          properties: {
+            grid: {
+              type: "string",
+              pattern: "^[01]{576}$",
+              description:
+                "24x24 occupancy grid flattened row-major: exactly 576 characters of 0/1, 1 = subject cell",
+            },
+            gridSize: { type: "integer", enum: [24] },
+            subjectPolygon: {
+              anyOf: [
+                {
+                  type: "array",
+                  maxItems: 48,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["x", "y"],
+                    properties: {
+                      x: { type: "number", minimum: 0, maximum: 1 },
+                      y: { type: "number", minimum: 0, maximum: 1 },
+                    },
+                  },
+                },
+                { type: "null" },
+              ],
+            },
+            subjectAreaRatio: { type: "number", minimum: 0, maximum: 1 },
+          },
+        },
+        { type: "null" },
+      ],
     },
   },
 } as const;
@@ -402,9 +466,15 @@ function extractJsonValue(text: string) {
   );
 }
 
-function parseVisionResponse(value: unknown): VisionAnalysisPatch {
+function parseVisionResponse(value: unknown): {
+  patch: VisionAnalysisPatch;
+  warnings: string[];
+} {
   if (isDetectionArray(value)) {
-    return visionAnalysisPatchSchema.parse(detectionArrayToVisionPatch(value));
+    return {
+      patch: visionAnalysisPatchSchema.parse(detectionArrayToVisionPatch(value)),
+      warnings: [],
+    };
   }
   if (Array.isArray(value)) {
     throw new Error(
@@ -420,7 +490,7 @@ function parseVisionResponse(value: unknown): VisionAnalysisPatch {
       "Vision model returned an object without usable semantic fields",
     );
   }
-  return visionAnalysisPatchSchema.parse(normalized);
+  return { patch: visionAnalysisPatchSchema.parse(normalized.patch), warnings: normalized.warnings };
 }
 
 // Models asked for the full object still drift from the JSON schema in
@@ -491,7 +561,163 @@ function coerceNormalizedPoint(value: unknown) {
   return null;
 }
 
-function normalizeObjectPatch(value: Record<string, unknown>) {
+// Occupancy ratio of a repaired/valid grid: share of cells marked 1.
+function gridOccupancyRatio(grid: string): number {
+  let occupied = 0;
+  for (const cell of grid) {
+    if (cell === "1") {
+      occupied += 1;
+    }
+  }
+  return occupied / CONTOUR_GRID_CELLS;
+}
+
+// Row-wise repair for drifted grids (length != 576, stray whitespace, line
+// breaks, non-0/1 characters). Line breaks preserve the model's row
+// boundaries: each row keeps only its 0/1 characters, is trimmed to 24 cells
+// and padded with 0; missing rows are all-zero. A single-line grid (no row
+// boundaries available) is re-chunked sequentially into 24 rows. Returns null
+// only when there is no usable 0/1 character at all.
+function repairContourGrid(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const lineRows = value
+    .split(/\r?\n/)
+    .map((row) => row.replace(/[^01]/g, ""))
+    .filter((row) => row.length > 0);
+  if (lineRows.length === 0) {
+    return null;
+  }
+  const flat = lineRows.join("");
+  if (flat.length === 0) {
+    return null;
+  }
+  const rows: string[] = [];
+  for (let row = 0; row < CONTOUR_GRID_SIZE; row += 1) {
+    if (lineRows.length > 1) {
+      const cells = lineRows[row] ?? "";
+      rows.push(
+        cells.slice(0, CONTOUR_GRID_SIZE).padEnd(CONTOUR_GRID_SIZE, "0"),
+      );
+    } else {
+      rows.push(
+        flat
+          .slice(row * CONTOUR_GRID_SIZE, (row + 1) * CONTOUR_GRID_SIZE)
+          .padEnd(CONTOUR_GRID_SIZE, "0"),
+      );
+    }
+  }
+  return rows.join("");
+}
+
+// Conservative fallback grid for an unusable contour: every cell whose center
+// falls inside the subject box is marked 1, everything else 0.
+function conservativeGridFromSubjectBox(box: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): string {
+  const rows: string[] = [];
+  for (let row = 0; row < CONTOUR_GRID_SIZE; row += 1) {
+    const centerY = (row + 0.5) / CONTOUR_GRID_SIZE;
+    let line = "";
+    for (let col = 0; col < CONTOUR_GRID_SIZE; col += 1) {
+      const centerX = (col + 0.5) / CONTOUR_GRID_SIZE;
+      const inside =
+        centerX >= box.x &&
+        centerX <= box.x + box.width &&
+        centerY >= box.y &&
+        centerY <= box.y + box.height;
+      line += inside ? "1" : "0";
+    }
+    rows.push(line);
+  }
+  return rows.join("");
+}
+
+// Accepts both polygon shapes models drift between — [{x, y}] objects and
+// [[x, y]] arrays — reusing the point coercion (which clamps 0-1). Illegal
+// points are dropped; fewer than 3 survivors means no polygon at all.
+function coerceSubjectPolygon(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const points = value
+    .map((point) => coerceNormalizedPoint(point))
+    .filter(
+      (point): point is { x: number; y: number } => point !== null,
+    )
+    .slice(0, CONTOUR_MAX_POLYGON_VERTICES);
+  return points.length >= 3 ? points : null;
+}
+
+const CONTOUR_GRID_REPAIRED_WARNING =
+  "Vision subjectContour grid was malformed; repaired row-wise to a 24x24 grid";
+const CONTOUR_GRID_FALLBACK_WARNING =
+  "Vision subjectContour grid was unusable; generated a conservative all-inside-subjectBox grid instead";
+const CONTOUR_GRID_OMITTED_WARNING =
+  "Vision subjectContour grid was unusable and no subjectBox was available; subjectContour omitted";
+
+function normalizeSubjectContour(
+  value: unknown,
+  subjectBox: ReturnType<typeof coerceNormalizedBox>,
+): { contour: SubjectContour | undefined; warnings: string[] } {
+  if (typeof value !== "object" || value === null) {
+    return { contour: undefined, warnings: [] };
+  }
+  const candidate = value as Record<string, unknown>;
+  const warnings: string[] = [];
+
+  let grid: string | null;
+  if (
+    typeof candidate.grid === "string" &&
+    CONTOUR_GRID_PATTERN.test(candidate.grid)
+  ) {
+    // A fully valid grid is taken byte-identical, like every other valid
+    // field in the object path.
+    grid = candidate.grid;
+  } else {
+    grid = repairContourGrid(candidate.grid);
+    if (grid !== null) {
+      warnings.push(CONTOUR_GRID_REPAIRED_WARNING);
+    }
+  }
+
+  if (grid === null) {
+    if (subjectBox !== null) {
+      grid = conservativeGridFromSubjectBox(subjectBox);
+      warnings.push(CONTOUR_GRID_FALLBACK_WARNING);
+    } else {
+      warnings.push(CONTOUR_GRID_OMITTED_WARNING);
+      return { contour: undefined, warnings };
+    }
+  }
+
+  const subjectPolygon = coerceSubjectPolygon(candidate.subjectPolygon);
+
+  const subjectAreaRatio =
+    typeof candidate.subjectAreaRatio === "number" &&
+    Number.isFinite(candidate.subjectAreaRatio)
+      ? Math.min(Math.max(candidate.subjectAreaRatio, 0), 1)
+      : gridOccupancyRatio(grid);
+
+  return {
+    contour: {
+      grid,
+      gridSize: CONTOUR_GRID_SIZE,
+      ...(subjectPolygon !== null ? { subjectPolygon } : {}),
+      subjectAreaRatio,
+    },
+    warnings,
+  };
+}
+
+function normalizeObjectPatch(value: Record<string, unknown>): {
+  patch: VisionAnalysisPatch;
+  warnings: string[];
+} | null {
   const faces = (Array.isArray(value.faces) ? value.faces : [])
     .map((entry) => coerceNormalizedBox(entry))
     .filter(
@@ -507,6 +733,11 @@ function normalizeObjectPatch(value: Record<string, unknown>) {
     subjectBoxCoerced.height > 0
       ? subjectBoxCoerced
       : null;
+
+  const subjectContour = normalizeSubjectContour(
+    value.subjectContour,
+    subjectBox,
+  );
 
   const contentTypeRaw =
     typeof value.contentType === "string"
@@ -551,7 +782,8 @@ function normalizeObjectPatch(value: Record<string, unknown>) {
     !contentTypeValid &&
     styleTags.length === 0 &&
     bestUseRaw.length === 0 &&
-    !cropSafetyValid
+    !cropSafetyValid &&
+    subjectContour.contour === undefined
   ) {
     return null;
   }
@@ -575,13 +807,19 @@ function normalizeObjectPatch(value: Record<string, unknown>) {
     : deriveCropSafety(contentType, faces);
 
   return {
-    contentType,
-    faces,
-    subjectBox,
-    saliencyCenter,
-    styleTags,
-    bestUse,
-    cropSafety,
+    patch: {
+      contentType,
+      faces,
+      subjectBox,
+      saliencyCenter,
+      styleTags,
+      bestUse,
+      cropSafety,
+      ...(subjectContour.contour !== undefined
+        ? { subjectContour: subjectContour.contour }
+        : {}),
+    },
+    warnings: subjectContour.warnings,
   };
 }
 
@@ -589,7 +827,7 @@ function normalizeObjectPatch(value: Record<string, unknown>) {
 // contract is spelled out there too: a single complete object, never a bare
 // detection array, with every semantic field the patch schema requires.
 const OUTPUT_CONTRACT_INSTRUCTION =
-  "Answer with a single JSON object (never an array) containing contentType, faces, subjectBox, saliencyCenter, styleTags (up to 8 concise style tags), bestUse, and cropSafety, matching the provided JSON schema.";
+  "Answer with a single JSON object (never an array) containing contentType, faces (up to 12 face/head boxes, empty array when none), subjectBox, saliencyCenter, styleTags (up to 8 concise style tags), bestUse, cropSafety, and subjectContour (an object with grid: exactly 576 characters of 0/1 for a 24x24 row-major occupancy grid where 1 marks a subject cell, gridSize: 24, subjectPolygon: up to 48 normalized 0-1 vertices for a single subject or null, and subjectAreaRatio: 0-1), matching the provided JSON schema.";
 
 // Appended on the one retry after an empty detection array, per the observed
 // relay failure mode where the model returns no box at all when uncertain.
@@ -621,7 +859,8 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
     const firstContent = await this.requestVisionCompletion(input);
     const firstValue = extractJsonValue(firstContent);
     if (!isEmptyDetectionArray(firstValue)) {
-      return { ...parseVisionResponse(firstValue), analysisWarnings: [] };
+      const { patch, warnings } = parseVisionResponse(firstValue);
+      return { ...patch, analysisWarnings: warnings };
     }
 
     // Observed relay behavior: the model answers with an array that carries
@@ -636,9 +875,10 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
     if (isEmptyDetectionArray(retryValue)) {
       throw new Error(EMPTY_DETECTION_AFTER_RETRY_MESSAGE);
     }
+    const { patch, warnings } = parseVisionResponse(retryValue);
     return {
-      ...parseVisionResponse(retryValue),
-      analysisWarnings: [EMPTY_DETECTION_RETRY_NOTICE],
+      ...patch,
+      analysisWarnings: [EMPTY_DETECTION_RETRY_NOTICE, ...warnings],
     };
   }
 
@@ -720,10 +960,14 @@ export function createVisionProviderFromEnvironment(
   });
 }
 
+// The contour fields are not yet part of ImageAssetAnalysis (packages/core
+// protocol), so the merged object carries them past the declared type: the
+// zod imageAssetAnalysisSchema is non-strict and strips (not rejects) the
+// extra key, keeping every existing merge/persist path behavior unchanged.
 export function mergeVisionAnalysis(
   basic: ImageAssetAnalysis,
   patch: VisionAnalysisPatch & { analysisWarnings?: string[] },
-): ImageAssetAnalysis {
+): ImageAssetAnalysis & { subjectContour?: SubjectContour } {
   // analysisWarnings is the provider's observability channel, not a semantic
   // analysis field: strip it so the merged analysis stays schema-clean.
   const { analysisWarnings: _providerWarnings, ...semantic } = patch;
@@ -731,5 +975,6 @@ export function mergeVisionAnalysis(
     ...basic,
     ...semantic,
     subjectBox: semantic.subjectBox ?? undefined,
+    subjectContour: semantic.subjectContour ?? undefined,
   };
 }
