@@ -116,10 +116,12 @@ function boxCenter(box: Rect): FocalPoint {
 /**
  * Resolves a semantic crop focus against the bound asset's analysis:
  * "subject" prefers the detected subject box, "saliency" prefers the
- * saliency center, "center" is the geometric center, and a custom
- * normalized point is used directly (clamped defensively into [0, 1]).
- * Each analysis-driven mode falls back to the other signal, then to the
- * image center, when the analysis lacks the preferred signal.
+ * saliency center, "center" is the geometric center, and a custom normalized
+ * point is used directly (clamped defensively into [0, 1]).
+ * "faces" resolves to the mean face center (the same center the cover-crop
+ * face-union constraint anchors on), "contour" to the subject-contour
+ * centroid. Each analysis-driven mode falls back to the other signal, then
+ * to the image center, when the analysis lacks the preferred signal.
  */
 export function resolveCropFocus(
   focus: CropFocus,
@@ -140,6 +142,32 @@ export function resolveCropFocus(
     }
     return { x: 0.5, y: 0.5 };
   }
+  if (focus === "faces") {
+    const faceCenter = meanFaceCenter(analysis);
+    if (faceCenter) {
+      return faceCenter;
+    }
+    if (analysis.subjectBox) {
+      return boxCenter(analysis.subjectBox);
+    }
+    if (analysis.saliencyCenter) {
+      return { ...analysis.saliencyCenter };
+    }
+    return { x: 0.5, y: 0.5 };
+  }
+  if (focus === "contour") {
+    const centroid = contourCentroid(analysis);
+    if (centroid) {
+      return centroid;
+    }
+    if (analysis.subjectBox) {
+      return boxCenter(analysis.subjectBox);
+    }
+    if (analysis.saliencyCenter) {
+      return { ...analysis.saliencyCenter };
+    }
+    return { x: 0.5, y: 0.5 };
+  }
   if (analysis.saliencyCenter) {
     return { ...analysis.saliencyCenter };
   }
@@ -147,6 +175,69 @@ export function resolveCropFocus(
     return boxCenter(analysis.subjectBox);
   }
   return { x: 0.5, y: 0.5 };
+}
+
+/** Mean face-box center — mirrors calculateCoverCrop's faceCenter exactly. */
+function meanFaceCenter(analysis: ImageAssetAnalysis): FocalPoint | null {
+  if (!analysis.faces || analysis.faces.length === 0) {
+    return null;
+  }
+  const x =
+    analysis.faces.reduce(
+      (total, face) => total + face.x + face.width / 2,
+      0,
+    ) / analysis.faces.length;
+  const y =
+    analysis.faces.reduce(
+      (total, face) => total + face.y + face.height / 2,
+      0,
+    ) / analysis.faces.length;
+  return { x, y };
+}
+
+/**
+ * Subject-contour centroid: mean of the simplified polygon vertices when
+ * present, otherwise the mean of occupied-grid cell centers. Metadata only —
+ * window placement for "contour" happens inside calculateCoverCrop.
+ */
+function contourCentroid(analysis: ImageAssetAnalysis): FocalPoint | null {
+  const contour = analysis.subjectContour;
+  if (!contour) {
+    return null;
+  }
+  if (contour.subjectPolygon && contour.subjectPolygon.length >= 3) {
+    const total = contour.subjectPolygon.reduce(
+      (accumulator, point) => ({
+        x: accumulator.x + point.x,
+        y: accumulator.y + point.y,
+      }),
+      { x: 0, y: 0 },
+    );
+    return {
+      x: total.x / contour.subjectPolygon.length,
+      y: total.y / contour.subjectPolygon.length,
+    };
+  }
+  if (
+    Number.isInteger(contour.gridSize) &&
+    contour.grid.length === contour.gridSize * contour.gridSize
+  ) {
+    let sumX = 0;
+    let sumY = 0;
+    let count = 0;
+    for (let index = 0; index < contour.grid.length; index++) {
+      if (contour.grid[index] !== "1") {
+        continue;
+      }
+      sumX += ((index % contour.gridSize) + 0.5) / contour.gridSize;
+      sumY += (Math.floor(index / contour.gridSize) + 0.5) / contour.gridSize;
+      count++;
+    }
+    if (count > 0) {
+      return { x: sumX / count, y: sumY / count };
+    }
+  }
+  return null;
 }
 
 /**
@@ -173,6 +264,16 @@ export function applyCropIntent(
     (cropIntent.zoom === undefined || cropIntent.zoom === "standard")
   ) {
     return null;
+  }
+
+  // Analysis-driven targets ("faces"/"contour") place the window — zoom
+  // included — inside the upgraded calculateCoverCrop entry; this mapping
+  // only refreshes the reported focal point and passes the window through.
+  if (focus === "faces" || focus === "contour") {
+    return {
+      ...coverCrop,
+      focalPoint: resolveCropFocus(focus, analysis),
+    };
   }
 
   const focalPoint =
@@ -637,6 +738,14 @@ function applySlotIntents(
           analysis,
           next.width * input.width,
           next.height * input.height,
+          // Analysis-driven targets resolve here so the face-union /
+          // contour-overlap placement (and their zoom tier) happen inside the
+          // upgraded entry; every other focus is inert in calculateCoverCrop
+          // and keeps flowing through applyCropIntent below, unchanged.
+          {
+            focus: intent.cropIntent.focus,
+            zoom: intent.cropIntent.zoom,
+          },
         );
         const cropped = applyCropIntent(
           coverCrop,

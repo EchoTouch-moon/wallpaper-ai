@@ -19,6 +19,30 @@ export const normalizedBoxSchema = z
     message: "Normalized box must remain inside its container",
   });
 
+/**
+ * Subject contour contract (vision stage output): a `gridSize` × `gridSize`
+ * row-major occupancy grid (1 = subject cell) plus an optional simplified
+ * polygon for single-subject images. Consumed by the retention-aware cover
+ * crop in planTemplate.ts; fully optional so analyses without it crop
+ * exactly as before.
+ */
+export const subjectContourSchema = z
+  .object({
+    grid: z.string().regex(/^[01]+$/),
+    gridSize: z.number().int().min(16).max(64),
+    subjectPolygon: z.array(normalizedPointSchema).min(3).max(48).optional(),
+    subjectAreaRatio: normalizedNumberSchema.optional(),
+  })
+  .superRefine((contour, context) => {
+    if (contour.grid.length !== contour.gridSize * contour.gridSize) {
+      context.addIssue({
+        code: "custom",
+        message: "subjectContour grid length must equal gridSize squared",
+        path: ["grid"],
+      });
+    }
+  });
+
 export const imageAssetAnalysisSchema = z.object({
   assetId: z.string().min(1),
   width: z.number().int().positive(),
@@ -43,8 +67,11 @@ export const imageAssetAnalysisSchema = z.object({
       "unknown",
     ])
     .optional(),
-  faces: z.array(normalizedBoxSchema).optional(),
+  // Ceiling 12 mirrors the vision prompt contract ("up to 12 face/head
+  // boxes") — more than that is vision noise, not a crowd worth honoring.
+  faces: z.array(normalizedBoxSchema).max(12).optional(),
   subjectBox: normalizedBoxSchema.optional(),
+  subjectContour: subjectContourSchema.optional(),
   saliencyCenter: normalizedPointSchema.optional(),
   styleTags: z.array(z.string()).optional(),
   bestUse: z

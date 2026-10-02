@@ -27,8 +27,15 @@ const cropFocusPointSchema = z.object({
   y: z.number().min(0).max(1),
 });
 
+/**
+ * Analysis-driven targets ("faces", "contour") place the crop window inside
+ * the upgraded `calculateCoverCrop` entry (planTemplate.ts): "faces" is a
+ * hard keep-the-face-union constraint, "contour" maximizes window↔subject
+ * overlap. They fall back through the remaining signals when the analysis
+ * lacks the data.
+ */
 export const cropFocusSchema = z.union([
-  z.enum(["subject", "saliency", "center"]),
+  z.enum(["subject", "saliency", "center", "contour", "faces"]),
   cropFocusPointSchema,
 ]);
 
@@ -103,6 +110,7 @@ export type TemplateRecipeFamily = z.infer<
   typeof templateRecipeFamilySchema
 >;
 export type CropFocus = z.infer<typeof cropFocusSchema>;
+export type CropZoom = z.infer<typeof cropZoomSchema>;
 export type CropIntent = z.infer<typeof cropIntentSchema>;
 export type VisualWeight = z.infer<typeof visualWeightSchema>;
 export type Layering = z.infer<typeof layeringSchema>;

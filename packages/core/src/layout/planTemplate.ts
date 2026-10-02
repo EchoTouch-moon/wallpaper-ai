@@ -14,7 +14,11 @@ import type {
   WallpaperTemplate,
 } from "../types/layout.ts";
 import type { SafeAreaType, WallpaperRatioId } from "../types/wallpaper.ts";
-import type { TemplateRecipe } from "./templateRecipe.ts";
+import type {
+  CropFocus,
+  CropZoom,
+  TemplateRecipe,
+} from "./templateRecipe.ts";
 import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 
 export interface TemplatePlanInput {
@@ -49,10 +53,393 @@ function usageForRatio(ratioId: WallpaperRatioId) {
   return ratioId === "21:9" ? ("ultrawide" as const) : ("desktop" as const);
 }
 
+// ---------------------------------------------------------------------------
+// Retention-aware crop targets (contour-aware cropping). A cover-crop window
+// keeps its aspect-driven size and slides along its single free axis (the
+// other axis always spans the full [0, 1]); the helpers below only decide
+// WHERE it slides. Target priority:
+//
+//   1. faces present           → window must fully contain the padded face
+//                                union; when it cannot fit, maximize the
+//                                area-weighted covered face length
+//   2. valid subjectPolygon    → maximize window ∩ polygon area
+//   3. occupancy grid only     → maximize retained occupied cells
+//   4. neither signal          → the original focal clamp, bit-for-bit
+//
+// `focus: "contour"` skips level 1 (the recipe explicitly asked for the
+// contour); `focus: "faces"` is the default data-driven behavior. Every
+// solver below is closed-form over a finite, deterministic candidate set —
+// no image processing, no iteration-to-threshold, bounded work (≤ 48²
+// polygon steps, ≤ 12² face steps, ≤ gridSize candidates with prefix-free
+// counting).
+// ---------------------------------------------------------------------------
+
+/**
+ * Local copy of compileTemplateRecipe's CROP_ZOOM_FACTORS: importing it back
+ * would create a module cycle (compileTemplateRecipe imports this file). The
+ * values are protocol constants — keep the two tables in sync.
+ */
+const COVER_CROP_ZOOM_FACTORS = {
+  tight: 0.8,
+  standard: 1,
+  loose: 1.2,
+} as const;
+
+/** Padding added around the face-box union before fitting the window. */
+const FACE_UNION_PADDING_RATIO = 0.1;
+
+/** Numeric tolerances for deterministic score/tie comparisons. */
+const CROP_FLOAT_EPS = 1e-12;
+const CROP_SCORE_EPS = 1e-12;
+
+export interface CoverCropOptions {
+  /**
+   * Semantic crop focus from a recipe slotIntent. Only the analysis-driven
+   * targets ("faces", "contour") change geometry here — every other focus
+   * value is resolved downstream by `applyCropIntent`, exactly as before.
+   */
+  focus?: CropFocus;
+  /** Zoom tier; consumed here only alongside a "faces"/"contour" focus. */
+  zoom?: CropZoom;
+}
+
+type ContourPoint = { x: number; y: number };
+
+interface SlideRequest {
+  /** The free axis the cover-crop window slides along. */
+  axis: "x" | "y";
+  /** Window extent along the sliding axis. */
+  windowLength: number;
+  /**
+   * The legacy clamp result, returned verbatim when no contour/face signal
+   * applies (the bit-for-bit fallback guard).
+   */
+  fallbackOffset: number;
+  /** Tie-break anchor: the offset the legacy focal clamp would prefer. */
+  preferredOffset: number;
+}
+
+/**
+ * Deterministically picks the best offset from a candidate set: highest
+ * score wins; exact-score ties go to the offset closest to the legacy
+ * preferred offset; remaining ties to the smaller offset (candidates are
+ * iterated in ascending order).
+ */
+function pickBestOffset(
+  candidates: number[],
+  scoreOffset: (offset: number) => number,
+  preferredOffset: number,
+): number {
+  let bestOffset = candidates[0];
+  let bestScore = -Infinity;
+  let bestTie = Infinity;
+  for (const offset of candidates) {
+    const score = scoreOffset(offset);
+    if (score > bestScore + CROP_SCORE_EPS) {
+      bestOffset = offset;
+      bestScore = score;
+      bestTie = Math.abs(offset - preferredOffset);
+      continue;
+    }
+    if (Math.abs(score - bestScore) <= CROP_SCORE_EPS) {
+      const tie = Math.abs(offset - preferredOffset);
+      if (tie < bestTie - CROP_FLOAT_EPS) {
+        bestOffset = offset;
+        bestTie = tie;
+      }
+    }
+  }
+  return bestOffset;
+}
+
+function sortedUniqueCandidates(values: Iterable<number>): number[] {
+  return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function decodeSubjectPolygon(
+  polygon: Array<ContourPoint> | undefined,
+): ContourPoint[] | null {
+  if (!polygon || polygon.length < 3) {
+    return null;
+  }
+  return polygon.map((point) => ({
+    x: clamp(point.x),
+    y: clamp(point.y),
+  }));
+}
+
+function decodeOccupancyGrid(
+  contour: ImageAssetAnalysis["subjectContour"],
+): { cells: string; size: number } | null {
+  if (!contour || typeof contour.grid !== "string") {
+    return null;
+  }
+  const size = contour.gridSize;
+  if (
+    !Number.isInteger(size) ||
+    size < 16 ||
+    size > 64 ||
+    contour.grid.length !== size * size ||
+    !/^[01]+$/.test(contour.grid)
+  ) {
+    return null;
+  }
+  return { cells: contour.grid, size };
+}
+
+/**
+ * Level 1 — hard face-union constraint. The padded union (10% of the union
+ * span on each side) must fit inside the window; when it does not, the
+ * piecewise-linear area-weighted coverage is maximized exactly by evaluating
+ * its breakpoints (window edges aligned with face-interval edges).
+ */
+function faceUnionSlideOffset(
+  faces: NonNullable<ImageAssetAnalysis["faces"]>,
+  request: SlideRequest,
+): number {
+  const length = request.windowLength;
+  const maxOffset = 1 - length;
+  const intervals = faces.map((face) => {
+    const start = request.axis === "x" ? face.x : face.y;
+    const extent = request.axis === "x" ? face.width : face.height;
+    return {
+      start,
+      end: start + extent,
+      weight: face.width * face.height,
+    };
+  });
+
+  const unionStart = Math.min(...intervals.map((interval) => interval.start));
+  const unionEnd = Math.max(...intervals.map((interval) => interval.end));
+  const padding = (unionEnd - unionStart) * FACE_UNION_PADDING_RATIO;
+  const targetStart = unionStart - padding;
+  const targetEnd = unionEnd + padding;
+
+  // Hard constraint feasible: window covers [targetStart, targetEnd], placed
+  // as centrally as the legal slide domain allows.
+  const fitLow = Math.max(0, targetEnd - length);
+  const fitHigh = Math.min(maxOffset, targetStart);
+  if (fitLow <= fitHigh + CROP_FLOAT_EPS) {
+    const ideal = clamp((targetStart + targetEnd) / 2 - length / 2, 0, maxOffset);
+    return clamp(ideal, fitLow, fitHigh);
+  }
+
+  // Does not fit: maximize Σ(faceArea × covered length). The objective is
+  // piecewise linear in the offset, so its optimum sits at a breakpoint —
+  // a window edge flush with a face-interval edge (or the domain bounds).
+  const candidates = sortedUniqueCandidates([
+    0,
+    maxOffset,
+    ...intervals.flatMap((interval) => [
+      clamp(interval.start, 0, maxOffset),
+      clamp(interval.end - length, 0, maxOffset),
+    ]),
+  ]);
+  return pickBestOffset(
+    candidates,
+    (offset) =>
+      intervals.reduce(
+        (total, interval) =>
+          total +
+          interval.weight *
+            Math.max(
+              0,
+              Math.min(interval.end, offset + length) -
+                Math.max(interval.start, offset),
+            ),
+        0,
+      ),
+    request.preferredOffset,
+  );
+}
+
+/** Shoelace area of a simple polygon (absolute value). */
+function polygonArea(points: ContourPoint[]): number {
+  let doubledArea = 0;
+  for (let index = 0; index < points.length; index++) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    doubledArea += current.x * next.y - next.x * current.y;
+  }
+  return Math.abs(doubledArea) / 2;
+}
+
+/**
+ * Sutherland–Hodgman clip of the polygon against one half-plane (the
+ * deterministic rectangle-clip building block). `inside` tests a point,
+ * `crossing` interpolates the polygon edge × clip-boundary intersection.
+ */
+function clipHalfPlane(
+  points: ContourPoint[],
+  inside: (point: ContourPoint) => boolean,
+  crossing: (from: ContourPoint, to: ContourPoint) => ContourPoint,
+): ContourPoint[] {
+  const output: ContourPoint[] = [];
+  for (let index = 0; index < points.length; index++) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    const currentInside = inside(current);
+    const nextInside = inside(next);
+    if (currentInside) {
+      output.push(current);
+    }
+    if (currentInside !== nextInside) {
+      output.push(crossing(current, next));
+    }
+  }
+  return output;
+}
+
+/**
+ * Level 2 — maximize the window ∩ polygon area. The intersection area is
+ * piecewise linear in the slide offset (Sutherland–Hodgman keeps every
+ * vertex a linear function of it), so its optimum sits where a window edge
+ * sweeps a polygon vertex — a finite, exhaustive candidate set.
+ */
+function polygonOverlapSlideOffset(
+  polygon: ContourPoint[],
+  request: SlideRequest,
+): number {
+  const length = request.windowLength;
+  const maxOffset = 1 - length;
+  const axis = request.axis;
+  const coordinate = (point: ContourPoint) => point[axis];
+
+  // The window covers the full [0, 1] along the other axis, so only the two
+  // half-planes along the sliding axis clip.
+  const intersectionArea = (offset: number) => {
+    let clipped = polygon;
+    clipped = clipHalfPlane(
+      clipped,
+      (point) => coordinate(point) >= offset,
+      (from, to) => {
+        const t = (offset - coordinate(from)) / (coordinate(to) - coordinate(from));
+        return {
+          x: from.x + t * (to.x - from.x),
+          y: from.y + t * (to.y - from.y),
+        };
+      },
+    );
+    if (clipped.length < 3) {
+      return 0;
+    }
+    clipped = clipHalfPlane(
+      clipped,
+      (point) => coordinate(point) <= offset + length,
+      (from, to) => {
+        const t =
+          (offset + length - coordinate(from)) /
+          (coordinate(to) - coordinate(from));
+        return {
+          x: from.x + t * (to.x - from.x),
+          y: from.y + t * (to.y - from.y),
+        };
+      },
+    );
+    return clipped.length < 3 ? 0 : polygonArea(clipped);
+  };
+
+  const candidates = sortedUniqueCandidates([
+    0,
+    maxOffset,
+    ...polygon.flatMap((point) => [
+      clamp(coordinate(point), 0, maxOffset),
+      clamp(coordinate(point) - length, 0, maxOffset),
+    ]),
+  ]);
+  return pickBestOffset(
+    candidates,
+    intersectionArea,
+    request.preferredOffset,
+  );
+}
+
+/**
+ * Level 3 — maximize retained occupied grid cells. Along the sliding axis
+ * the retention is a step function whose plateaus break exactly where a
+ * window edge aligns with an occupied-cell center, so evaluating those
+ * alignments (plus the domain bounds) is exact. Row-major grid: cell
+ * (row, column) has its center at ((column + 0.5) / size, (row + 0.5) / size).
+ */
+function gridRetentionSlideOffset(
+  grid: { cells: string; size: number },
+  request: SlideRequest,
+): number {
+  const length = request.windowLength;
+  const maxOffset = 1 - length;
+  const centers: number[] = [];
+  for (let index = 0; index < grid.cells.length; index++) {
+    if (grid.cells[index] !== "1") {
+      continue;
+    }
+    const row = Math.floor(index / grid.size);
+    const column = index % grid.size;
+    centers.push(((request.axis === "x" ? column : row) + 0.5) / grid.size);
+  }
+  if (centers.length === 0) {
+    return request.fallbackOffset;
+  }
+  centers.sort((left, right) => left - right);
+
+  const candidates = sortedUniqueCandidates([
+    0,
+    maxOffset,
+    ...centers.flatMap((center) => [
+      clamp(center, 0, maxOffset),
+      clamp(center - length, 0, maxOffset),
+    ]),
+  ]);
+  return pickBestOffset(
+    candidates,
+    (offset) => {
+      let retained = 0;
+      for (const center of centers) {
+        if (
+          center >= offset - CROP_FLOAT_EPS &&
+          center <= offset + length + CROP_FLOAT_EPS
+        ) {
+          retained++;
+        }
+      }
+      return retained;
+    },
+    request.preferredOffset,
+  );
+}
+
+/**
+ * Applies the retention-aware target priority for one slide axis. Returns
+ * the legacy fallback offset untouched whenever the analysis carries no
+ * face/contour signal (the baseline-identity guard).
+ */
+function resolveSlideOffset(
+  analysis: ImageAssetAnalysis,
+  options: CoverCropOptions,
+  request: SlideRequest,
+): number {
+  const faces = analysis.faces ?? [];
+  const polygon = decodeSubjectPolygon(analysis.subjectContour?.subjectPolygon);
+  const grid = decodeOccupancyGrid(analysis.subjectContour);
+
+  // focus "contour" explicitly demotes faces; every other focus (including
+  // the default and "faces") keeps faces as the top-priority target.
+  if (options.focus !== "contour" && faces.length > 0) {
+    return faceUnionSlideOffset(faces, request);
+  }
+  if (polygon) {
+    return polygonOverlapSlideOffset(polygon, request);
+  }
+  if (grid) {
+    return gridRetentionSlideOffset(grid, request);
+  }
+  return request.fallbackOffset;
+}
+
 export function calculateCoverCrop(
   analysis: ImageAssetAnalysis,
   slotWidth: number,
   slotHeight: number,
+  options: CoverCropOptions = {},
 ) {
   const sourceAspect = analysis.aspectRatio;
   const targetAspect = slotWidth / slotHeight;
@@ -82,10 +469,23 @@ export function calculateCoverCrop(
     subjectCenter ??
     analysis.saliencyCenter ?? { x: 0.5, y: 0.5 };
 
+  // Zoom is consumed here only for the analysis-driven targets — every other
+  // focus keeps the legacy split where applyCropIntent applies the zoom.
+  const zoomFactor =
+    (options.focus === "faces" || options.focus === "contour") && options.zoom
+      ? COVER_CROP_ZOOM_FACTORS[options.zoom]
+      : 1;
+
   if (sourceAspect > targetAspect) {
-    const width = targetAspect / sourceAspect;
+    const width = Math.min(1, (targetAspect / sourceAspect) * zoomFactor);
+    const fallbackX = clamp(focalPoint.x - width / 2, 0, 1 - width);
     return {
-      x: clamp(focalPoint.x - width / 2, 0, 1 - width),
+      x: resolveSlideOffset(analysis, options, {
+        axis: "x",
+        windowLength: width,
+        fallbackOffset: fallbackX,
+        preferredOffset: fallbackX,
+      }),
       y: 0,
       width,
       height: 1,
@@ -93,16 +493,22 @@ export function calculateCoverCrop(
     };
   }
 
-  const height = sourceAspect / targetAspect;
+  const height = Math.min(1, (sourceAspect / targetAspect) * zoomFactor);
   const isPortraitInLandscape =
     analysis.orientation === "portrait" && targetAspect > 1;
   const fallbackY = isPortraitInLandscape
     ? (1 - height) * 0.35
     : (1 - height) / 2;
-  const y =
-    faceCenter || subjectCenter || analysis.saliencyCenter
-      ? clamp(focalPoint.y - height / 2, 0, 1 - height)
-      : fallbackY;
+  const clampedY = clamp(focalPoint.y - height / 2, 0, 1 - height);
+  const y = resolveSlideOffset(analysis, options, {
+    axis: "y",
+    windowLength: height,
+    fallbackOffset:
+      faceCenter || subjectCenter || analysis.saliencyCenter
+        ? clampedY
+        : fallbackY,
+    preferredOffset: clampedY,
+  });
   return {
     x: 0,
     y,
