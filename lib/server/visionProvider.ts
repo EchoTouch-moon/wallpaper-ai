@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { z } from "zod";
+import sharp from "sharp";
 
 import {
   normalizedBoxSchema,
@@ -839,6 +840,28 @@ const EMPTY_DETECTION_RETRY_NOTICE =
 const EMPTY_DETECTION_AFTER_RETRY_MESSAGE =
   "Vision model returned an array without usable box_2d detection entries after one retry with an explicit salient-subject-box requirement";
 
+// Vision calls send a downscaled preview instead of the original: detection
+// boxes and the contour grid are normalized 0-1, so geometry is unaffected,
+// while an 8K original pushes relay calls past the ~120s gateway cap (a
+// 1024-1536px preview returns the same patch in seconds).
+const VISION_MAX_DIMENSION = 1536;
+
+async function buildVisionImageUrl(input: VisionAnalysisInput): Promise<string> {
+  const { buffer, mimeType, width, height } = input;
+  if (width <= VISION_MAX_DIMENSION && height <= VISION_MAX_DIMENSION) {
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  }
+  const resized = await sharp(buffer)
+    .resize({
+      width: width >= height ? VISION_MAX_DIMENSION : undefined,
+      height: height > width ? VISION_MAX_DIMENSION : undefined,
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  return `data:image/jpeg;base64,${resized.toString("base64")}`;
+}
+
 export class OpenAICompatibleVisionProvider implements VisionProvider {
   private readonly client: OpenAI;
   private readonly config: VisionProviderConfig;
@@ -856,7 +879,12 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
   }
 
   async analyze(input: VisionAnalysisInput): Promise<VisionAnalysisResult> {
-    const firstContent = await this.requestVisionCompletion(input);
+    // Downscale once (coordinates are normalized 0-1, so geometry is
+    // unaffected): sending an 8K original makes relay vision calls blow past
+    // gateway timeouts, while a <=1536px preview returns the same boxes in
+    // seconds (verified live: 4.6s at 1024px vs >120s at 7680px).
+    const imageUrl = await buildVisionImageUrl(input);
+    const firstContent = await this.requestVisionCompletion(input, imageUrl);
     const firstValue = extractJsonValue(firstContent);
     if (!isEmptyDetectionArray(firstValue)) {
       const { patch, warnings } = parseVisionResponse(firstValue);
@@ -869,6 +897,7 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
     // (throws, so callers fall back to basic analysis with a warning).
     const retryContent = await this.requestVisionCompletion(
       input,
+      imageUrl,
       SALIENT_SUBJECT_RETRY_INSTRUCTION,
     );
     const retryValue = extractJsonValue(retryContent);
@@ -884,6 +913,7 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
 
   private async requestVisionCompletion(
     input: VisionAnalysisInput,
+    imageUrl: string,
     extraInstruction?: string,
   ) {
     const instructions = [
@@ -915,7 +945,7 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
             {
               type: "image_url",
               image_url: {
-                url: `data:${input.mimeType};base64,${input.buffer.toString("base64")}`,
+                url: imageUrl,
                 detail: "low",
               },
             },
