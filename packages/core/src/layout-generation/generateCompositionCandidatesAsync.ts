@@ -6,8 +6,10 @@ import {
 } from "./compositionContracts.ts";
 import {
   createCompositionCandidateFromRecipe,
+  createCompositionCandidateFromTemplate,
   generateCompositionCandidates,
 } from "./generateCompositionCandidates.ts";
+import { getTemplate } from "../layout/templates.ts";
 import { refineTemplateRecipe } from "./refineTemplateRecipe.ts";
 import {
   loadLayoutModelConfig,
@@ -92,11 +94,34 @@ export async function generateCompositionCandidatesAsync(
       visionPlanning,
       planningWarnings,
     );
+    // Discarded model candidates stay observable: a silent drop here made the
+    // multimodal planner's intermittent contract misses (omitted background
+    // assignment, unmaterializable recipe) indistinguishable from a clean
+    // deterministic set (experiment v4: 4/4 scenarios at aiCount 0 with a
+    // single fallback warning).
+    const discardedWarnings: string[] = [];
     const modelCandidates = plan.candidates.flatMap((candidate, index) => {
-      if (!candidate.recipe) {
-        return [];
-      }
+      const candidateName = candidate.id ?? `candidate-${index + 1}`;
       try {
+        // Registered candidates (templateId set, recipe null) are a legal
+        // planning-protocol v2 shape; materialize them through the template
+        // path instead of dropping them.
+        if (candidate.templateId) {
+          return [
+            createCompositionCandidateFromTemplate(
+              request,
+              getTemplate(candidate.templateId),
+              index,
+              candidate,
+            ),
+          ];
+        }
+        if (!candidate.recipe) {
+          discardedWarnings.push(
+            `Model candidate ${candidateName} returned neither templateId nor recipe and was skipped.`,
+          );
+          return [];
+        }
         return [
           createCompositionCandidateFromRecipe(
             request,
@@ -105,7 +130,12 @@ export async function generateCompositionCandidatesAsync(
             candidate,
           ),
         ];
-      } catch {
+      } catch (error) {
+        discardedWarnings.push(
+          `Model candidate ${candidateName} could not be materialized: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
         return [];
       }
     });
@@ -117,7 +147,11 @@ export async function generateCompositionCandidatesAsync(
     if (selection.candidates.length !== 3) {
       return compositionGenerationResponseSchema.parse({
         ...fallback,
-        warnings: [...planningWarnings, ...fallback.warnings],
+        warnings: [
+          ...planningWarnings,
+          ...discardedWarnings,
+          ...fallback.warnings,
+        ],
       });
     }
     const fallbackCount = selection.candidates.filter(
@@ -128,6 +162,7 @@ export async function generateCompositionCandidatesAsync(
       source: modelCandidates.length > 0 ? "ai" : "recipe-fallback",
       warnings: [
         ...planningWarnings,
+        ...discardedWarnings,
         ...(fallbackCount > 0
           ? [
               `${fallbackCount} deterministic candidate${

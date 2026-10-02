@@ -18,6 +18,7 @@ import type {
   ImageAssetAnalysis,
   LayoutCandidate,
   WallpaperLayout,
+  WallpaperTemplate,
 } from "../types/layout.ts";
 
 interface CompositionCandidatePlan {
@@ -216,6 +217,15 @@ function applyExplicitHero(
   };
 }
 
+/**
+ * Multimodal planners (glm-5v-turbo tier) intermittently omit one slot
+ * assignment — observed live on the layered-collage background slot — or
+ * hallucinate an asset id. Throwing on the first omission discarded the whole
+ * AI candidate, and when every candidate tripped the response sank into
+ * recipe-fallback (experiment v4: 4/4 scenarios, aiCount 0). Unassigned slots
+ * now fall back to the planner's deterministic default, preferring assets the
+ * model left unused so the slot→asset mapping stays a permutation.
+ */
 function applyPlannedAssignments(
   layout: WallpaperLayout,
   plan: CompositionCandidatePlan | undefined,
@@ -227,31 +237,80 @@ function applyPlannedAssignments(
   const analysisById = new Map(
     analyses.map((analysis) => [analysis.assetId, analysis]),
   );
+  // Hallucinated asset ids never resolve to an analysis; drop them here so
+  // those slots take the deterministic fallback instead of throwing.
   const assignmentBySlot = new Map(
-    plan.assignments.map((assignment) => [assignment.slotId, assignment]),
+    plan.assignments
+      .filter((assignment) => analysisById.has(assignment.assetId))
+      .map((assignment) => [assignment.slotId, assignment]),
   );
+  const modelUsedAssetIds = new Set(
+    [...assignmentBySlot.values()].map((assignment) => assignment.assetId),
+  );
+  const spareAssetIds = layout.items
+    .map((item) => item.assetId)
+    .filter(
+      (assetId) =>
+        analysisById.has(assetId) && !modelUsedAssetIds.has(assetId),
+    );
+  let spareCursor = 0;
   const items = layout.items.map((item) => {
     const assignment = assignmentBySlot.get(item.slotId ?? "");
-    if (!assignment) {
-      throw new Error(`Missing model assignment for slot ${item.slotId}`);
+    if (assignment) {
+      const analysis = analysisById.get(assignment.assetId);
+      if (!analysis) {
+        return item;
+      }
+      return {
+        ...item,
+        assetId: assignment.assetId,
+        crop: assignment.crop
+          ? {
+              ...assignment.crop,
+              focalPoint: assignment.crop.focalPoint ?? undefined,
+            }
+          : calculateCoverCrop(analysis, item.width, item.height),
+      };
     }
-    const analysis = analysisById.get(assignment.assetId);
-    if (!analysis) {
-      throw new Error(`Unknown model asset ${assignment.assetId}`);
+    const fallbackAssetId =
+      spareCursor < spareAssetIds.length
+        ? spareAssetIds[spareCursor++]
+        : item.assetId;
+    const fallbackAnalysis = analysisById.get(fallbackAssetId);
+    if (!fallbackAnalysis || fallbackAssetId === item.assetId) {
+      return item;
     }
     return {
       ...item,
-      assetId: assignment.assetId,
-      crop: assignment.crop
-        ? {
-            ...assignment.crop,
-            focalPoint: assignment.crop.focalPoint ?? undefined,
-          }
-        : calculateCoverCrop(analysis, item.width, item.height),
+      assetId: fallbackAssetId,
+      crop: calculateCoverCrop(
+        fallbackAnalysis,
+        item.width,
+        item.height,
+      ),
     };
   });
 
   return { ...layout, items };
+}
+
+/**
+ * Deterministic fact appendix for model reasons (experiment finding 7): the
+ * model may describe crops that were never applied — E4 candidates claimed
+ * "Null crops protect faces/text" while the compiler resolved a cover crop —
+ * so every model reason gains one appended line stating what actually
+ * compiled. The model's original text stays byte-identical above it.
+ */
+export function appendCompiledReasonFacts(
+  reason: string,
+  layout: WallpaperLayout,
+): string {
+  const hero =
+    layout.items.find((item) => item.role === "hero") ?? layout.items[0];
+  const facts = hero?.crop
+    ? `[compiled] hero crop x=${hero.crop.x.toFixed(2)} w=${hero.crop.width.toFixed(2)}; ${layout.items.length} slots`
+    : `[compiled] no hero crop; ${layout.items.length} slots`;
+  return `${reason}\n${facts}`;
 }
 
 export function createCompositionCandidateFromRecipe(
@@ -260,15 +319,71 @@ export function createCompositionCandidateFromRecipe(
   index: number,
   plan?: CompositionCandidatePlan,
 ): LayoutCandidate {
-  const { brief, assets } = request;
-  const ratioId = planningRatio(brief);
+  const { brief } = request;
   const template = compileTemplateRecipe({
     recipe,
     ratioId: brief.target.ratioId,
     width: brief.target.width,
     height: brief.target.height,
-    assetCount: assets.length,
+    assetCount: request.assets.length,
+    // Pixel safe-area rectangles — the same caliber the layout carries (see
+    // evalScoring.candidateSafeAreaScore) — so the compiler translates or
+    // shrinks slots that would cover the clock/widget/dock/icon zones.
+    safeAreas: safeAreasForBrief(brief),
   });
+  return materializePlannedCandidate(request, template, index, plan, {
+    templateSource: "generated",
+    templateRecipe: recipe,
+    recipeProfile: recipe.profile,
+  });
+}
+
+/**
+ * Materializes a registered-template candidate (planning protocol v2: "For a
+ * registered candidate set recipe to null"). The multimodal planner returns
+ * this shape intermittently — mobile briefs favored registered triptych
+ * templates in live experiments — and dropping them silently sank whole
+ * scenarios into recipe-fallback. Ratio and asset-count compatibility are
+ * enforced here; violations throw with a diagnosable message that the async
+ * wrapper surfaces as a warning.
+ */
+export function createCompositionCandidateFromTemplate(
+  request: CompositionGenerationRequest,
+  template: WallpaperTemplate,
+  index: number,
+  plan?: CompositionCandidatePlan,
+): LayoutCandidate {
+  const { brief, assets } = request;
+  if (!template.supportedRatios.includes(brief.target.ratioId)) {
+    throw new Error(
+      `Template ${template.id} does not support ratio ${brief.target.ratioId}`,
+    );
+  }
+  if (assets.length < template.minImages || assets.length > template.maxImages) {
+    throw new Error(
+      `Template ${template.id} needs ${template.minImages}-${template.maxImages} assets, got ${assets.length}`,
+    );
+  }
+  return materializePlannedCandidate(request, template, index, plan, {
+    templateSource: "registered",
+  });
+}
+
+interface MaterializeOptions {
+  templateSource: "registered" | "generated";
+  templateRecipe?: TemplateRecipe;
+  recipeProfile?: TemplateRecipe["profile"];
+}
+
+function materializePlannedCandidate(
+  request: CompositionGenerationRequest,
+  template: WallpaperTemplate,
+  index: number,
+  plan: CompositionCandidatePlan | undefined,
+  options: MaterializeOptions,
+): LayoutCandidate {
+  const { brief, assets } = request;
+  const ratioId = planningRatio(brief);
   const planned = planTemplateCandidate({
     analyses: assets,
     canvasSize: {
@@ -284,8 +399,8 @@ export function createCompositionCandidateFromRecipe(
         : brief.intent.hierarchy === "single-hero"
           ? "single-hero"
           : "hero-with-support",
-    templateSource: "generated",
-    templateRecipe: recipe,
+    templateSource: options.templateSource,
+    templateRecipe: options.templateRecipe,
   });
   const withAssignments = applyPlannedAssignments(
     planned.layout,
@@ -334,13 +449,18 @@ export function createCompositionCandidateFromRecipe(
   if (!validated.success) {
     throw validated.error;
   }
-  const copy = PROFILE_COPY[recipe.profile];
+  const fallbackProfile = options.recipeProfile ?? "safe";
+  const copy = PROFILE_COPY[fallbackProfile];
 
   return {
     ...planned,
-    id: plan?.id ?? `composition_${recipe.profile}`,
+    id: plan?.id ?? `composition_${fallbackProfile}`,
     label: plan?.label ?? copy.label,
-    reason: plan?.reason ?? copy.reason,
+    // Model reasons gain the compiled-facts appendix; deterministic copy
+    // stays byte-identical because it cannot hallucinate.
+    reason: plan
+      ? appendCompiledReasonFacts(plan.reason, validated.data)
+      : copy.reason,
     harmonyScore: plan?.harmonyScore ?? planned.harmonyScore,
     usedFallback: !plan,
     layout: validated.data,

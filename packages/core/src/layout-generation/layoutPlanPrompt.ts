@@ -280,6 +280,7 @@ const BRIEF_PLANNING_RULES = [
   "Map the composition brief to recipe semantics directly: hierarchy decides how strongly the hero dominates, density decides margin, gap, and heroShare, rhythm decides the recipe rhythm field, and visualFlow decides heroPosition and the support arrangement.",
   "When the brief names a heroAssetId, that exact asset must occupy the hero slot; keep it there even when its analysis suggests a supporting role.",
   "Honor the brief target: desktop and laptop canvases keep salient content away from icon and dock safe areas, ultrawide canvases favor horizontal flows, mobile and lock-screen canvases favor top-to-bottom flows, and a lock-screen canvas keeps the clock and widget areas visually quiet.",
+  "When the brief target usage is desktop and its safeAreas include desktop-dock, keep the dock strip clear: cap recipe heroShare at 0.6 or raise recipe margin to at least 0.05, because a hero above that share or below that margin swallows the dock zone.",
   "Respect the brief constraints: preserveFaces and preserveText protect detected faces and text-heavy content from being cropped away, cropTolerance bounds how tightly an asset may be cropped, and safeAreas must stay free of salient content.",
   "Treat the brief prompt as the primary creative intent; the structural hierarchy, density, rhythm, and visualFlow fields qualify it, never override it.",
 ] as const;
@@ -297,6 +298,8 @@ const SLOT_INTENT_PLANNING_RULES = [
   "Use cropIntent focus subject or saliency only when that asset's analysis provides subjectBox or saliencyCenter; otherwise prefer center or omit the field.",
   "Keys of slotIntents must be slot IDs used in the same candidate's assignments; intents for slots the recipe does not produce are ignored.",
   "Use layering only when the profile or boundary actually stacks content: none keeps tiles separate, slight adds subtle depth overlap, and strong adds pronounced stacking.",
+  "Emit slotIntents with no user prompt too: an automatic set still benefits from per-slot judgment, for example {\"hero\":{\"cropIntent\":{\"focus\":\"subject\"},\"visualWeight\":\"dominant\"}}, {\"support-1\":{\"visualWeight\":\"subtle\"}} differentiates slots the recipe alone would treat alike.",
+  "Emit slotIntents for prompts in English or any other language whenever the prompt implies per-slot treatment: a prompt like \"keep every face fully visible, zoom the landscape supports\" maps to cropIntent {\"focus\":\"subject\",\"zoom\":\"loose\"} on the asset carrying a face and visualWeight \"subtle\" on the supports.",
 ] as const;
 
 const REFINE_PLANNING_RULES = [

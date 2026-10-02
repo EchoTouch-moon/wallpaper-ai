@@ -178,7 +178,7 @@ test("falls back to deterministic recipes when the planning provider fails", asy
   assert.match(response.warnings[0], /AI planner unavailable: Vision planning endpoint is down/);
 });
 
-test("falls back when every model candidate lacks a usable recipe", async () => {
+test("materializes registered-template candidates the model returns instead of dropping them", async () => {
   const response = await generateCompositionCandidatesAsync(
     { brief, assets, candidateCount: 3 },
     {
@@ -203,8 +203,52 @@ test("falls back when every model candidate lacks a usable recipe", async () => 
     },
   );
 
+  // Planning protocol v2 lets the model answer with a registered template
+  // (recipe null + templateId set); dropping it silently sank whole scenarios
+  // into recipe-fallback (live experiment: E2/E3 at aiCount 0).
+  assert.equal(response.source, "ai");
+  assert.equal(response.candidates.length, 3);
+  const modelCandidate = response.candidates.find(
+    (item) => item.id === "model_template_only",
+  );
+  assert.ok(modelCandidate);
+  assert.equal(modelCandidate.usedFallback, false);
+  assert.equal(modelCandidate.layout.template?.source, "registered");
+});
+
+test("falls back when the registered template cannot serve the brief", async () => {
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3 },
+    {
+      provider: {
+        async generatePlan() {
+          return {
+            candidates: [
+              {
+                ...candidate(
+                  "model_mobile_template",
+                  "safe",
+                  "hero-grid",
+                  ["hero", "support-1", "support-2"],
+                ),
+                recipe: null,
+                // Mobile-only template against the 16:9 desktop brief.
+                templateId: "triptych_mobile_cinematic",
+              },
+            ],
+          };
+        },
+      },
+    },
+  );
+
   assert.equal(response.source, "recipe-fallback");
   assert.equal(response.candidates.length, 3);
+  assert.ok(
+    response.warnings.some((warning) =>
+      warning.includes("could not be materialized"),
+    ),
+  );
 });
 
 test("uses the model for natural-language recipe refinement", async () => {
@@ -486,4 +530,61 @@ test("degrades the refinement path from vision planning to text-only planning", 
       .assetId,
     "asset_b",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Compiled-facts appendix (experiment finding 7): the E4 model claimed "Null
+// crops protect faces/text" while the compiler had resolved cover crops. The
+// v2 assembly point appends one deterministic fact line to every model reason
+// — never rewriting the model's own text — and leaves deterministic fallback
+// copy untouched.
+// ---------------------------------------------------------------------------
+
+test("appends compiled crop facts to model reasons without altering them", async () => {
+  const response = await generateCompositionCandidatesAsync(
+    { brief, assets, candidateCount: 3 },
+    {
+      provider: {
+        async generatePlan() {
+          return {
+            candidates: [
+              candidate("model_safe", "safe", "hero-grid", [
+                "hero",
+                "support-1",
+                "support-2",
+              ]),
+            ],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(response.source, "ai");
+  const modelCandidate = response.candidates.find(
+    (item) => item.id === "model_safe",
+  );
+  const originalReason = "The model chose a hero-grid recipe.";
+
+  assert.ok(modelCandidate.reason.startsWith(originalReason));
+  assert.match(
+    modelCandidate.reason,
+    /\n\[compiled\] hero crop x=\d+\.\d{2} w=\d+\.\d{2}; 3 slots$/,
+  );
+
+  // The appendix numbers state the layout as compiled, countering reason
+  // hallucinations about null or protective crops.
+  const hero = modelCandidate.layout.items.find(
+    (item) => item.role === "hero",
+  );
+  assert.ok(modelCandidate.reason.includes(`x=${hero.crop.x.toFixed(2)}`));
+  assert.ok(modelCandidate.reason.includes(`w=${hero.crop.width.toFixed(2)}`));
+
+  // Deterministic fills keep their static copy, byte-identical.
+  for (const item of response.candidates.filter(
+    (candidate) => candidate.id !== "model_safe",
+  )) {
+    assert.equal(item.usedFallback, true);
+    assert.doesNotMatch(item.reason, /\[compiled\]/);
+  }
 });

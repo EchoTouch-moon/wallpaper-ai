@@ -400,6 +400,61 @@ test("the v2 system rules explain how to use the semantic knobs conservatively",
   assert.equal(legacy.system.includes("layering"), false);
 });
 
+// ---------------------------------------------------------------------------
+// Guardrails from the DSV4.1 experiment: E1 dynamic-1 swallowed the desktop
+// dock with heroShare 0.68 (rule 1), and E2/E4 model candidates never used
+// slotIntents with no prompt or an English prompt (rule 2).
+// ---------------------------------------------------------------------------
+
+test("the v2 system rules guard the desktop dock safe area", () => {
+  const messages = createPlanningRequestMessages(
+    buildGeneratePlanningRequest(brief, assets),
+  );
+
+  for (const fragment of [
+    "usage is desktop and its safeAreas include desktop-dock",
+    "cap recipe heroShare at 0.6",
+    "raise recipe margin to at least 0.05",
+  ]) {
+    assert.ok(
+      messages.system.includes(fragment),
+      `the v2 dock guardrail must state "${fragment}"`,
+    );
+  }
+
+  // The frozen legacy prompt must stay byte-identical (no new guardrails).
+  const legacy = createLayoutPlanMessages({
+    operation: "generate",
+    request: {
+      operation: "generate",
+      canvas: { width: 1920, height: 1080, ratioId: "16:9" },
+      intent: { mode: "ai", style: "auto", count: 1 },
+      assets,
+      options: { candidateCount: 1, allowFallback: true },
+    },
+  });
+  assert.equal(legacy.system.includes("desktop-dock"), false);
+});
+
+test("the v2 slotIntents guidance covers no-prompt and English-prompt scenarios with examples", () => {
+  const messages = createPlanningRequestMessages(
+    buildGeneratePlanningRequest(brief, assets),
+  );
+
+  for (const fragment of [
+    "Emit slotIntents with no user prompt too",
+    '"hero":{"cropIntent":{"focus":"subject"},"visualWeight":"dominant"}',
+    '"support-1":{"visualWeight":"subtle"}',
+    "English or any other language",
+    '"focus":"subject","zoom":"loose"',
+  ]) {
+    assert.ok(
+      messages.system.includes(fragment),
+      `the v2 slotIntents guidance must exemplify "${fragment}"`,
+    );
+  }
+});
+
 test("multimodal content parts annotate every asset image and keep the payload last", () => {
   const assetContent = [
     { assetId: "asset_a", dataUrl: "data:image/png;base64,iVBORw0KGgo=" },

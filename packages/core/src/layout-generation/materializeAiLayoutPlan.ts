@@ -3,6 +3,7 @@ import { compileTemplateRecipe } from "../layout/compileTemplateRecipe.ts";
 import { calculateCoverCrop, planTemplateCandidate } from "../layout/planTemplate.ts";
 import { getTemplate } from "../layout/templates.ts";
 import { validateLayout } from "../layout/validateLayout.ts";
+import { appendCompiledReasonFacts } from "./generateCompositionCandidates.ts";
 import type { AiLayoutPlanResponse } from "./aiPlanSchema.ts";
 import type { GenerateLayoutRequest } from "../types/generateLayout.ts";
 import type { LayoutCandidate } from "../types/layout.ts";
@@ -160,7 +161,9 @@ function materializeCandidate(
   return {
     id: plan.id,
     label: plan.label,
-    reason: plan.reason,
+    // Model reasons gain the deterministic compiled-facts appendix (finding 7):
+    // the original text is preserved verbatim above the appended line.
+    reason: appendCompiledReasonFacts(plan.reason, validated.data),
     harmonyScore: plan.harmonyScore,
     usedFallback: false,
     layout: validated.data,

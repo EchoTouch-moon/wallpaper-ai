@@ -391,3 +391,57 @@ test("an explicit model crop still wins over the recipe crop intent", () => {
     { x: 0, y: 0, width: 1, height: 1 },
   );
 });
+
+// ---------------------------------------------------------------------------
+// Compiled-facts appendix (experiment finding 7): the materialized candidate
+// keeps the model's reason verbatim and gains one deterministic line stating
+// the crops that actually compiled.
+// ---------------------------------------------------------------------------
+
+test("appends deterministic compiled facts below the untouched model reason", () => {
+  const originalReason =
+    "The hero remains prominent while support images stay ordered.";
+  const candidates = materializeAiLayoutPlan(
+    {
+      candidates: [
+        {
+          ...plan(assignments).candidates[0],
+          reason: originalReason,
+          templateId: null,
+          recipe: {
+            version: "1.0",
+            profile: "safe",
+            family: "hero-grid",
+            heroPosition: "left",
+            heroShare: 0.56,
+            supportCount: 2,
+            margin: 0.02,
+            gap: 0.012,
+            cornerRadius: 0.018,
+            rhythm: "ordered",
+            boundary: "clean-gap",
+            safeAreaPolicy: "avoid",
+          },
+          assignments: [
+            { slotId: "hero", assetId: "asset_a", crop: null },
+            { slotId: "support-1", assetId: "asset_b", crop: null },
+            { slotId: "support-2", assetId: "asset_c", crop: null },
+          ],
+        },
+      ],
+    },
+    request,
+  );
+
+  const reason = candidates[0].reason;
+  assert.ok(reason.startsWith(originalReason));
+  assert.match(
+    reason,
+    /\n\[compiled\] hero crop x=\d+\.\d{2} w=\d+\.\d{2}; 3 slots$/,
+  );
+
+  // The appended numbers are the compiled hero crop, not model prose.
+  const hero = candidates[0].layout.items.find((item) => item.role === "hero");
+  assert.ok(reason.includes(`x=${hero.crop.x.toFixed(2)}`));
+  assert.ok(reason.includes(`w=${hero.crop.width.toFixed(2)}`));
+});
