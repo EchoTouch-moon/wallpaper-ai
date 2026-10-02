@@ -20,6 +20,14 @@ export interface LayoutModelConfig {
   responseFormat: LlmResponseFormat;
   timeoutMs: number;
   /**
+   * Present only when LLM_STREAMING is exactly "true": planning calls stream
+   * chat-completion deltas instead of waiting for a buffered response, which
+   * keeps bytes flowing through relay gateways whose idle timeouts would
+   * otherwise cut off long-thinking models. Omitted otherwise so zero-config
+   * deployments keep the exact previous shape.
+   */
+  streaming?: boolean;
+  /**
    * Present only when VISION_PLANNING_ENABLED=true resolves to an usable
    * vision model configuration. Omitted otherwise so zero-config deployments
    * keep the exact previous shape and the provider stays text-only.
@@ -59,6 +67,18 @@ function parseTimeout(value: string | undefined) {
   return timeout;
 }
 
+function parseStreaming(value: string | undefined): boolean {
+  if (!value || value === "false") {
+    return false;
+  }
+  if (value === "true") {
+    return true;
+  }
+  throw new LayoutModelConfigurationError(
+    'LLM_STREAMING must be exactly "true" or "false"',
+  );
+}
+
 export function loadLayoutModelConfig(
   environment: Record<string, string | undefined> = process.env,
 ): LayoutModelConfig {
@@ -81,6 +101,7 @@ export function loadLayoutModelConfig(
     responseFormat: parseResponseFormat(environment.LLM_RESPONSE_FORMAT),
     timeoutMs: parseTimeout(environment.LLM_TIMEOUT_MS),
     // Conditional spread keeps the zero-config shape byte-identical.
+    ...(parseStreaming(environment.LLM_STREAMING) ? { streaming: true } : {}),
     ...(visionPlanning ? { visionPlanning } : {}),
   };
 }

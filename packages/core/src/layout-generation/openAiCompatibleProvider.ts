@@ -183,24 +183,20 @@ export class OpenAICompatibleLayoutProvider
     const client = visionPlanning
       ? (this.visionClient ?? this.client)
       : this.client;
+    const body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
+      model: visionPlanning?.model ?? this.config.model,
+      messages: [
+        { role: "system", content: messages.system },
+        { role: "user", content: messages.user },
+      ],
+      response_format: responseFormat,
+    };
     try {
-      const completion = await client.chat.completions.create({
-        model: visionPlanning?.model ?? this.config.model,
-        messages: [
-          { role: "system", content: messages.system },
-          { role: "user", content: messages.user },
-        ],
-        response_format: responseFormat,
-      });
-      const message = completion.choices[0]?.message;
-      if (!message?.content) {
-        throw new LayoutProviderError(
-          "invalid_response",
-          message?.refusal || "Layout model returned an empty response",
-        );
-      }
-
-      const parsed = extractJsonValue(message.content);
+      const content =
+        this.config.streaming === true
+          ? await this.streamPlanContent(client, body)
+          : await this.bufferedPlanContent(client, body);
+      const parsed = extractJsonValue(content);
       return aiLayoutPlanResponseSchema.parse(parsed);
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof ZodError) {
@@ -211,6 +207,48 @@ export class OpenAICompatibleLayoutProvider
       }
       throw classifyProviderError(error);
     }
+  }
+
+  private async bufferedPlanContent(
+    client: OpenAI,
+    body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  ): Promise<string> {
+    const completion = await client.chat.completions.create(body);
+    const message = completion.choices[0]?.message;
+    if (!message?.content) {
+      throw new LayoutProviderError(
+        "invalid_response",
+        message?.refusal || "Layout model returned an empty response",
+      );
+    }
+    return message.content;
+  }
+
+  private async streamPlanContent(
+    client: OpenAI,
+    body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
+  ): Promise<string> {
+    const stream = await client.chat.completions.create({
+      ...body,
+      stream: true,
+    });
+    let content = "";
+    // Reasoning models emit reasoning deltas before the JSON content; those
+    // keep the connection alive through relay gateways but are not part of
+    // the plan payload, so only content deltas accumulate.
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      if (delta && typeof delta.content === "string") {
+        content += delta.content;
+      }
+    }
+    if (!content) {
+      throw new LayoutProviderError(
+        "invalid_response",
+        "Layout model returned an empty streamed response",
+      );
+    }
+    return content;
   }
 }
 

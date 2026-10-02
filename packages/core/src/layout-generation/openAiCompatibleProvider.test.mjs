@@ -426,3 +426,113 @@ test("attaches the vision planning configuration only when the gate resolves", (
     },
   );
 });
+
+function streamingClient(chunks, capture) {
+  return {
+    chat: {
+      completions: {
+        async create(body) {
+          capture.body = body;
+          if (!body.stream) {
+            throw new Error("streaming client only accepts stream requests");
+          }
+          return (async function* generate() {
+            for (const chunk of chunks) {
+              yield chunk;
+            }
+          })();
+        },
+      },
+    },
+  };
+}
+
+test("streams content deltas (ignoring reasoning deltas) into a full plan", async () => {
+  const capture = {};
+  const planJson = JSON.stringify(plan);
+  const provider = new OpenAICompatibleLayoutProvider(
+    {
+      apiKey: "test-key",
+      baseURL: "https://example.test/v1",
+      model: "test-model",
+      responseFormat: "json_object",
+      timeoutMs: 5_000,
+      streaming: true,
+    },
+    streamingClient(
+      [
+        { choices: [{ delta: { reasoning_content: "thinking..." } }] },
+        { choices: [{ delta: { content: planJson.slice(0, 20) } }] },
+        { choices: [{ delta: { reasoning_content: "more thinking" } }] },
+        { choices: [{ delta: { content: planJson.slice(20) } }] },
+        { choices: [{ delta: {}, finish_reason: "stop" }] },
+      ],
+      capture,
+    ),
+  );
+
+  const result = await provider.generatePlan(planningRequest);
+
+  assert.equal(result.candidates[0].templateId, "triptych_desktop_equal");
+  assert.equal(capture.body.stream, true);
+  assert.equal(capture.body.model, "test-model");
+});
+
+test("an empty streamed response raises invalid_response", async () => {
+  const provider = new OpenAICompatibleLayoutProvider(
+    {
+      apiKey: "test-key",
+      baseURL: "https://example.test/v1",
+      model: "test-model",
+      responseFormat: "json_object",
+      timeoutMs: 5_000,
+      streaming: true,
+    },
+    streamingClient(
+      [{ choices: [{ delta: { reasoning_content: "never answers" } }] }],
+      {},
+    ),
+  );
+
+  await assert.rejects(
+    () => provider.generatePlan(planningRequest),
+    (error) =>
+      error.code === "invalid_response" &&
+      error.message.includes("empty streamed response"),
+  );
+});
+
+test("LLM_STREAMING resolves strictly and stays absent by default", () => {
+  assert.equal(
+    "streaming" in loadLayoutModelConfig({
+      LLM_API_KEY: "key",
+      LLM_MODEL: "model",
+    }),
+    false,
+  );
+  assert.equal(
+    loadLayoutModelConfig({
+      LLM_API_KEY: "key",
+      LLM_MODEL: "model",
+      LLM_STREAMING: "true",
+    }).streaming,
+    true,
+  );
+  assert.equal(
+    "streaming" in loadLayoutModelConfig({
+      LLM_API_KEY: "key",
+      LLM_MODEL: "model",
+      LLM_STREAMING: "false",
+    }),
+    false,
+  );
+  assert.throws(
+    () =>
+      loadLayoutModelConfig({
+        LLM_API_KEY: "key",
+        LLM_MODEL: "model",
+        LLM_STREAMING: "yes",
+      }),
+    /LLM_STREAMING/,
+  );
+});
