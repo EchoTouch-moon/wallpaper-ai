@@ -203,6 +203,51 @@ export function maskCentroid(
   return { x: sumX / count / maskSize, y: sumY / count / maskSize };
 }
 
+/** Single-channel subject alpha mask aligned 1:1 with the input image. */
+export interface SubjectAlphaMask {
+  /** Input image width in pixels (after EXIF orientation). */
+  width: number;
+  /** Input image height in pixels (after EXIF orientation). */
+  height: number;
+  /**
+   * width * height row-major bytes, 0 = background .. 255 = subject. Soft
+   * (unbinarized) on purpose: compositing consumers want feathered edges,
+   * while grid consumers can still feed binarizeMask themselves.
+   */
+  data: Uint8Array;
+}
+
+/**
+ * Scales a [0, 1] probability map to 0-255 alpha bytes (clamped, rounded).
+ * The alpha-mask counterpart of binarizeMask.
+ */
+export function probabilityMapToAlphaBytes(
+  probabilities: ArrayLike<number>,
+): Uint8Array {
+  const alpha = new Uint8Array(probabilities.length);
+  for (let i = 0; i < probabilities.length; i += 1) {
+    const value = probabilities[i];
+    const clamped = value < 0 ? 0 : value > 1 ? 1 : value;
+    alpha[i] = Math.round(clamped * 255);
+  }
+  return alpha;
+}
+
+/**
+ * Pixel dimensions of an image after sharp's `.rotate()` EXIF auto-orient:
+ * orientations 5-8 (the 90/270 degree rotations) swap width and height.
+ */
+export function orientedDimensions(
+  width: number,
+  height: number,
+  orientation?: number,
+): { width: number; height: number } {
+  if (orientation !== undefined && orientation >= 5 && orientation <= 8) {
+    return { width: height, height: width };
+  }
+  return { width, height };
+}
+
 /**
  * Pools a square binary mask into a gridSize x gridSize occupancy string
  * (row-major, 1 = subject cell). Each mask pixel votes for the cell its
@@ -641,6 +686,16 @@ export interface LocalVision {
     buffer: Buffer,
     mimeType: string,
   ): Promise<LocalSubjectContour | null>;
+  /**
+   * Segments the subject with ISNet and returns the mask as a soft
+   * (unbinarized) single-channel alpha map at the input image's own
+   * (EXIF-oriented) resolution. Returns null when local vision is disabled.
+   * Throws LocalVisionUnavailableError when the model file is missing.
+   */
+  extractSubjectAlphaMask(
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<SubjectAlphaMask | null>;
 }
 
 function assertImageInput(buffer: Buffer, mimeType: string): void {
@@ -781,14 +836,15 @@ export function createLocalVision(
     });
   }
 
-  async function extractSubjectContour(
+  /**
+   * Shared ISNet inference: EXIF-orient, LANCZOS fill-stretch to
+   * 1024x1024 sRGB, rembg normalization, then normalize the output into a
+   * [0, 1] probability map at model resolution. Both contour and alpha-mask
+   * consumers post-process this same tensor.
+   */
+  async function runIsnetProbabilityMap(
     buffer: Buffer,
-    mimeType: string,
-  ): Promise<LocalSubjectContour | null> {
-    if (!enabled()) {
-      return null;
-    }
-    assertImageInput(buffer, mimeType);
+  ): Promise<Float32Array> {
     const session = await loadSession(ISNET_MODEL_FILE);
     const ort = await import(/*turbopackIgnore: true*/ "onnxruntime-node");
 
@@ -829,9 +885,20 @@ export function createLocalVision(
       );
     }
 
-    const probabilities = normalizeProbabilityMap(
-      output.data as ArrayLike<number>,
-    );
+    return normalizeProbabilityMap(output.data as ArrayLike<number>);
+  }
+
+  async function extractSubjectContour(
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<LocalSubjectContour | null> {
+    if (!enabled()) {
+      return null;
+    }
+    assertImageInput(buffer, mimeType);
+    const size = ISNET_INPUT_SIZE;
+
+    const probabilities = await runIsnetProbabilityMap(buffer);
     const mask = binarizeMask(probabilities);
     const polygon = traceMaskPolygon(mask, size, CONTOUR_MAX_POLYGON_VERTICES);
     return {
@@ -844,7 +911,55 @@ export function createLocalVision(
     };
   }
 
-  return { detectFaces, extractSubjectContour };
+  async function extractSubjectAlphaMask(
+    buffer: Buffer,
+    mimeType: string,
+  ): Promise<SubjectAlphaMask | null> {
+    if (!enabled()) {
+      return null;
+    }
+    assertImageInput(buffer, mimeType);
+
+    const meta = await sharp(buffer).metadata();
+    const { width, height } = orientedDimensions(
+      meta.width ?? 0,
+      meta.height ?? 0,
+      meta.orientation,
+    );
+    if (width < 1 || height < 1) {
+      throw new Error(
+        "Cannot extract subject alpha mask: image has no decodable size",
+      );
+    }
+
+    const probabilities = await runIsnetProbabilityMap(buffer);
+    const alpha = probabilityMapToAlphaBytes(probabilities);
+
+    // The model saw the image fill-stretched to 1024x1024, so stretch the
+    // mask back to the oriented source resolution (matching inverse) before
+    // handing it out — consumers multiply it 1:1 onto the source pixels.
+    const alphaBuffer = Buffer.from(
+      alpha.buffer,
+      alpha.byteOffset,
+      alpha.byteLength,
+    );
+    const { data, info } = await sharp(alphaBuffer, {
+      raw: { width: ISNET_INPUT_SIZE, height: ISNET_INPUT_SIZE, channels: 1 },
+    })
+      .resize(width, height, { fit: "fill", kernel: "cubic" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    // Grayscale raw input comes back replicated across sRGB channels; sample
+    // one channel per pixel (stride-adaptive in case libvips keeps 1 band).
+    const stride = info.channels;
+    const mask = new Uint8Array(width * height);
+    for (let i = 0; i < mask.length; i += 1) {
+      mask[i] = data[i * stride];
+    }
+    return { width, height, data: mask };
+  }
+
+  return { detectFaces, extractSubjectContour, extractSubjectAlphaMask };
 }
 
 let defaultInstance: LocalVision | null = null;
@@ -869,4 +984,11 @@ export function extractSubjectContour(
   mimeType: string,
 ): Promise<LocalSubjectContour | null> {
   return getDefaultLocalVision().extractSubjectContour(buffer, mimeType);
+}
+
+export function extractSubjectAlphaMask(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<SubjectAlphaMask | null> {
+  return getDefaultLocalVision().extractSubjectAlphaMask(buffer, mimeType);
 }
