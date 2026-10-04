@@ -34,6 +34,14 @@ export default defineConfig({
       VISION_API_KEY: "",
       VISION_MODEL: "",
       VISION_PLANNING_ENABLED: "true",
+      // The local ONNX geometry layer stays off in e2e: this suite exercises
+      // the UI orchestration and the planning degradation chain, not local
+      // model inference (that contract is covered by the lib/server unit
+      // tests). It also keeps the suite machine-independent — with models
+      // present each upload spends seconds in ISNet inference and blows the
+      // upload assertions' timeout, and without them the layer degrades with
+      // warnings instead.
+      LOCAL_VISION_ENABLED: "false",
     },
   },
 });

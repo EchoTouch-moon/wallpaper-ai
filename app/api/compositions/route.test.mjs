@@ -68,9 +68,13 @@ test("uploads real images, creates a composition, refines it, and restores it", 
   const previousAssetRoot = process.env.ONE_TOUCH_STORAGE_DIR;
   const previousCompositionRoot = process.env.ONE_TOUCH_COMPOSITION_DIR;
   const previousVision = process.env.VISION_ENABLED;
+  const previousLocalVision = process.env.LOCAL_VISION_ENABLED;
   process.env.ONE_TOUCH_STORAGE_DIR = assetRoot;
   process.env.ONE_TOUCH_COMPOSITION_DIR = compositionRoot;
   process.env.VISION_ENABLED = "false";
+  // Keep the API test off the (default-on) local ONNX geometry layer so it
+  // neither runs real model inference nor records local-layer warnings.
+  process.env.LOCAL_VISION_ENABLED = "false";
 
   try {
     const first = await upload(
@@ -225,6 +229,11 @@ test("uploads real images, creates a composition, refines it, and restores it", 
       delete process.env.VISION_ENABLED;
     } else {
       process.env.VISION_ENABLED = previousVision;
+    }
+    if (previousLocalVision === undefined) {
+      delete process.env.LOCAL_VISION_ENABLED;
+    } else {
+      process.env.LOCAL_VISION_ENABLED = previousLocalVision;
     }
     await Promise.all([
       rm(assetRoot, { recursive: true, force: true }),

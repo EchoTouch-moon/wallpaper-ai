@@ -3,33 +3,15 @@ import { z } from "zod";
 import sharp from "sharp";
 
 import {
-  normalizedBoxSchema,
   normalizedPointSchema,
 } from "../../packages/core/src/layout/layoutSchema.ts";
 import type { ImageAssetAnalysis } from "../../packages/core/src/types/layout.ts";
 
-// Subject contour contract: a 24x24 occupancy grid (1 = subject cell) plus an
-// optional simplified polygon for single-subject images.
-const CONTOUR_GRID_SIZE = 24;
-const CONTOUR_GRID_CELLS = CONTOUR_GRID_SIZE * CONTOUR_GRID_SIZE; // 576
-const CONTOUR_MAX_POLYGON_VERTICES = 48;
-const CONTOUR_GRID_PATTERN = new RegExp(`^[01]{${CONTOUR_GRID_CELLS}}$`);
-
-const subjectContourSchema = z
-  .object({
-    grid: z.string().regex(CONTOUR_GRID_PATTERN),
-    gridSize: z.literal(CONTOUR_GRID_SIZE),
-    subjectPolygon: z
-      .array(normalizedPointSchema)
-      .min(3)
-      .max(CONTOUR_MAX_POLYGON_VERTICES)
-      .optional(),
-    subjectAreaRatio: z.number().min(0).max(1),
-  })
-  .strict();
-
-export type SubjectContour = z.infer<typeof subjectContourSchema>;
-
+// Layering contract: the local ONNX layer owns every geometry field
+// (faces/subjectBox/saliencyCenter/subjectContour); the VLM contributes
+// semantics only. saliencyCenter stays optional here so a VLM-only deployment
+// (local layer disabled) still gets a usable fallback point — a local value
+// always wins at merge time.
 const visionAnalysisPatchSchema = z
   .object({
     contentType: z.enum([
@@ -42,10 +24,7 @@ const visionAnalysisPatchSchema = z
       "text-heavy",
       "unknown",
     ]),
-    faces: z.array(normalizedBoxSchema).max(12),
-    subjectBox: normalizedBoxSchema.nullable(),
-    subjectContour: subjectContourSchema.optional(),
-    saliencyCenter: normalizedPointSchema,
+    saliencyCenter: normalizedPointSchema.optional(),
     styleTags: z.array(z.string().trim().min(1).max(32)).max(8),
     bestUse: z
       .array(
@@ -120,13 +99,10 @@ const VISION_RESPONSE_SCHEMA = {
   additionalProperties: false,
   required: [
     "contentType",
-    "faces",
-    "subjectBox",
     "saliencyCenter",
     "styleTags",
     "bestUse",
     "cropSafety",
-    "subjectContour",
   ],
   properties: {
     contentType: {
@@ -142,45 +118,21 @@ const VISION_RESPONSE_SCHEMA = {
         "unknown",
       ],
     },
-    faces: {
-      type: "array",
-      maxItems: 12,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["x", "y", "width", "height"],
-        properties: {
-          x: { type: "number", minimum: 0, maximum: 1 },
-          y: { type: "number", minimum: 0, maximum: 1 },
-          width: { type: "number", exclusiveMinimum: 0, maximum: 1 },
-          height: { type: "number", exclusiveMinimum: 0, maximum: 1 },
-        },
-      },
-    },
-    subjectBox: {
+    // Optional at the semantic level: strict JSON-schema mode requires every
+    // property to be listed, so optionality is expressed as anyOf + null.
+    saliencyCenter: {
       anyOf: [
         {
           type: "object",
           additionalProperties: false,
-          required: ["x", "y", "width", "height"],
+          required: ["x", "y"],
           properties: {
             x: { type: "number", minimum: 0, maximum: 1 },
             y: { type: "number", minimum: 0, maximum: 1 },
-            width: { type: "number", exclusiveMinimum: 0, maximum: 1 },
-            height: { type: "number", exclusiveMinimum: 0, maximum: 1 },
           },
         },
         { type: "null" },
       ],
-    },
-    saliencyCenter: {
-      type: "object",
-      additionalProperties: false,
-      required: ["x", "y"],
-      properties: {
-        x: { type: "number", minimum: 0, maximum: 1 },
-        y: { type: "number", minimum: 0, maximum: 1 },
-      },
     },
     styleTags: {
       type: "array",
@@ -206,46 +158,6 @@ const VISION_RESPONSE_SCHEMA = {
     cropSafety: {
       type: "string",
       enum: ["high", "medium", "low"],
-    },
-    // Optional at the semantic level: strict JSON-schema mode requires every
-    // property to be listed, so optionality is expressed as anyOf + null.
-    subjectContour: {
-      anyOf: [
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["grid", "gridSize", "subjectPolygon", "subjectAreaRatio"],
-          properties: {
-            grid: {
-              type: "string",
-              pattern: "^[01]{576}$",
-              description:
-                "24x24 occupancy grid flattened row-major: exactly 576 characters of 0/1, 1 = subject cell",
-            },
-            gridSize: { type: "integer", enum: [24] },
-            subjectPolygon: {
-              anyOf: [
-                {
-                  type: "array",
-                  maxItems: 48,
-                  items: {
-                    type: "object",
-                    additionalProperties: false,
-                    required: ["x", "y"],
-                    properties: {
-                      x: { type: "number", minimum: 0, maximum: 1 },
-                      y: { type: "number", minimum: 0, maximum: 1 },
-                    },
-                  },
-                },
-                { type: "null" },
-              ],
-            },
-            subjectAreaRatio: { type: "number", minimum: 0, maximum: 1 },
-          },
-        },
-        { type: "null" },
-      ],
     },
   },
 } as const;
@@ -364,11 +276,13 @@ function deriveCropSafety(
   return "medium";
 }
 
-// Maps a native detection array onto the semantic patch contract. The largest
-// subject-labelled box becomes subjectBox; remaining face/person boxes become
-// faces (max 12). The detection shape cannot express styleTags, so they stay
-// empty; contentType/bestUse/cropSafety are derived conservatively from the
-// mapped boxes so the merged analysis still validates.
+// Maps a native detection array onto the semantic patch contract. The boxes
+// carry no semantic type of their own, so contentType/bestUse/cropSafety are
+// derived conservatively from the largest subject-labelled box and any
+// face/person labels; the detection shape cannot express styleTags, so they
+// stay empty. Geometry itself (faces/subjectBox) is NOT carried into the
+// patch — the local vision layer owns it — but the mapped subject box center
+// survives as the optional saliencyCenter fallback.
 function detectionArrayToVisionPatch(
   detections: DetectionEntry[],
 ): VisionAnalysisPatch {
@@ -405,14 +319,12 @@ function detectionArrayToVisionPatch(
         x: subjectBox.x + subjectBox.width / 2,
         y: subjectBox.y + subjectBox.height / 2,
       }
-    : { x: 0.5, y: 0.5 };
+    : undefined;
 
   const contentType = deriveContentType(subjectBox, faces);
   return {
     contentType,
-    faces,
-    subjectBox,
-    saliencyCenter,
+    ...(saliencyCenter !== undefined ? { saliencyCenter } : {}),
     styleTags: [],
     bestUse: deriveBestUse(contentType, subjectBox),
     cropSafety: deriveCropSafety(contentType, faces),
@@ -562,159 +474,13 @@ function coerceNormalizedPoint(value: unknown) {
   return null;
 }
 
-// Occupancy ratio of a repaired/valid grid: share of cells marked 1.
-function gridOccupancyRatio(grid: string): number {
-  let occupied = 0;
-  for (const cell of grid) {
-    if (cell === "1") {
-      occupied += 1;
-    }
-  }
-  return occupied / CONTOUR_GRID_CELLS;
-}
-
-// Row-wise repair for drifted grids (length != 576, stray whitespace, line
-// breaks, non-0/1 characters). Line breaks preserve the model's row
-// boundaries: each row keeps only its 0/1 characters, is trimmed to 24 cells
-// and padded with 0; missing rows are all-zero. A single-line grid (no row
-// boundaries available) is re-chunked sequentially into 24 rows. Returns null
-// only when there is no usable 0/1 character at all.
-function repairContourGrid(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const lineRows = value
-    .split(/\r?\n/)
-    .map((row) => row.replace(/[^01]/g, ""))
-    .filter((row) => row.length > 0);
-  if (lineRows.length === 0) {
-    return null;
-  }
-  const flat = lineRows.join("");
-  if (flat.length === 0) {
-    return null;
-  }
-  const rows: string[] = [];
-  for (let row = 0; row < CONTOUR_GRID_SIZE; row += 1) {
-    if (lineRows.length > 1) {
-      const cells = lineRows[row] ?? "";
-      rows.push(
-        cells.slice(0, CONTOUR_GRID_SIZE).padEnd(CONTOUR_GRID_SIZE, "0"),
-      );
-    } else {
-      rows.push(
-        flat
-          .slice(row * CONTOUR_GRID_SIZE, (row + 1) * CONTOUR_GRID_SIZE)
-          .padEnd(CONTOUR_GRID_SIZE, "0"),
-      );
-    }
-  }
-  return rows.join("");
-}
-
-// Conservative fallback grid for an unusable contour: every cell whose center
-// falls inside the subject box is marked 1, everything else 0.
-function conservativeGridFromSubjectBox(box: {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}): string {
-  const rows: string[] = [];
-  for (let row = 0; row < CONTOUR_GRID_SIZE; row += 1) {
-    const centerY = (row + 0.5) / CONTOUR_GRID_SIZE;
-    let line = "";
-    for (let col = 0; col < CONTOUR_GRID_SIZE; col += 1) {
-      const centerX = (col + 0.5) / CONTOUR_GRID_SIZE;
-      const inside =
-        centerX >= box.x &&
-        centerX <= box.x + box.width &&
-        centerY >= box.y &&
-        centerY <= box.y + box.height;
-      line += inside ? "1" : "0";
-    }
-    rows.push(line);
-  }
-  return rows.join("");
-}
-
-// Accepts both polygon shapes models drift between — [{x, y}] objects and
-// [[x, y]] arrays — reusing the point coercion (which clamps 0-1). Illegal
-// points are dropped; fewer than 3 survivors means no polygon at all.
-function coerceSubjectPolygon(value: unknown) {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const points = value
-    .map((point) => coerceNormalizedPoint(point))
-    .filter(
-      (point): point is { x: number; y: number } => point !== null,
-    )
-    .slice(0, CONTOUR_MAX_POLYGON_VERTICES);
-  return points.length >= 3 ? points : null;
-}
-
-const CONTOUR_GRID_REPAIRED_WARNING =
-  "Vision subjectContour grid was malformed; repaired row-wise to a 24x24 grid";
-const CONTOUR_GRID_FALLBACK_WARNING =
-  "Vision subjectContour grid was unusable; generated a conservative all-inside-subjectBox grid instead";
-const CONTOUR_GRID_OMITTED_WARNING =
-  "Vision subjectContour grid was unusable and no subjectBox was available; subjectContour omitted";
-
-function normalizeSubjectContour(
-  value: unknown,
-  subjectBox: ReturnType<typeof coerceNormalizedBox>,
-): { contour: SubjectContour | undefined; warnings: string[] } {
-  if (typeof value !== "object" || value === null) {
-    return { contour: undefined, warnings: [] };
-  }
-  const candidate = value as Record<string, unknown>;
-  const warnings: string[] = [];
-
-  let grid: string | null;
-  if (
-    typeof candidate.grid === "string" &&
-    CONTOUR_GRID_PATTERN.test(candidate.grid)
-  ) {
-    // A fully valid grid is taken byte-identical, like every other valid
-    // field in the object path.
-    grid = candidate.grid;
-  } else {
-    grid = repairContourGrid(candidate.grid);
-    if (grid !== null) {
-      warnings.push(CONTOUR_GRID_REPAIRED_WARNING);
-    }
-  }
-
-  if (grid === null) {
-    if (subjectBox !== null) {
-      grid = conservativeGridFromSubjectBox(subjectBox);
-      warnings.push(CONTOUR_GRID_FALLBACK_WARNING);
-    } else {
-      warnings.push(CONTOUR_GRID_OMITTED_WARNING);
-      return { contour: undefined, warnings };
-    }
-  }
-
-  const subjectPolygon = coerceSubjectPolygon(candidate.subjectPolygon);
-
-  const subjectAreaRatio =
-    typeof candidate.subjectAreaRatio === "number" &&
-    Number.isFinite(candidate.subjectAreaRatio)
-      ? Math.min(Math.max(candidate.subjectAreaRatio, 0), 1)
-      : gridOccupancyRatio(grid);
-
-  return {
-    contour: {
-      grid,
-      gridSize: CONTOUR_GRID_SIZE,
-      ...(subjectPolygon !== null ? { subjectPolygon } : {}),
-      subjectAreaRatio,
-    },
-    warnings,
-  };
-}
-
+// Normalizes an object response into the semantic-only patch. Geometry the
+// model still returns (faces/subjectBox/subjectContour drift from older
+// prompts) is ignored — the local vision layer owns geometry — but usable
+// boxes still inform the conservative semantic derivations when a semantic
+// field itself is missing. Missing geometry is NOT an unavailability signal:
+// an object with only contentType/styleTags/bestUse/cropSafety is a complete
+// semantic response.
 function normalizeObjectPatch(value: Record<string, unknown>): {
   patch: VisionAnalysisPatch;
   warnings: string[];
@@ -734,11 +500,6 @@ function normalizeObjectPatch(value: Record<string, unknown>): {
     subjectBoxCoerced.height > 0
       ? subjectBoxCoerced
       : null;
-
-  const subjectContour = normalizeSubjectContour(
-    value.subjectContour,
-    subjectBox,
-  );
 
   const contentTypeRaw =
     typeof value.contentType === "string"
@@ -775,28 +536,30 @@ function normalizeObjectPatch(value: Record<string, unknown>): {
     cropSafetyRaw as "high" | "medium" | "low",
   );
 
-  // Salvage requires at least one usable signal; an object with none of the
-  // semantic fields present is a failed response, not a patch to merge.
+  // Salvage requires at least one usable signal: any semantic field, or a
+  // geometry field usable for deriving one. An object with none of those is a
+  // failed response, not a patch to merge.
   if (
-    subjectBox === null &&
-    faces.length === 0 &&
     !contentTypeValid &&
     styleTags.length === 0 &&
     bestUseRaw.length === 0 &&
     !cropSafetyValid &&
-    subjectContour.contour === undefined
+    subjectBox === null &&
+    faces.length === 0
   ) {
     return null;
   }
 
+  const saliencyCenterCoerced = coerceNormalizedPoint(value.saliencyCenter);
   const saliencyCenter =
-    coerceNormalizedPoint(value.saliencyCenter) ??
-    (subjectBox
-      ? {
-          x: subjectBox.x + subjectBox.width / 2,
-          y: subjectBox.y + subjectBox.height / 2,
-        }
-      : { x: 0.5, y: 0.5 });
+    saliencyCenterCoerced !== null
+      ? saliencyCenterCoerced
+      : subjectBox
+        ? {
+            x: subjectBox.x + subjectBox.width / 2,
+            y: subjectBox.y + subjectBox.height / 2,
+          }
+        : undefined;
 
   const bestUse =
     bestUseRaw.length > 0
@@ -810,25 +573,22 @@ function normalizeObjectPatch(value: Record<string, unknown>): {
   return {
     patch: {
       contentType,
-      faces,
-      subjectBox,
-      saliencyCenter,
+      ...(saliencyCenter !== undefined ? { saliencyCenter } : {}),
       styleTags,
       bestUse,
       cropSafety,
-      ...(subjectContour.contour !== undefined
-        ? { subjectContour: subjectContour.contour }
-        : {}),
     },
-    warnings: subjectContour.warnings,
+    warnings: [],
   };
 }
 
 // Relays that ignore response_format only see the text prompt, so the output
-// contract is spelled out there too: a single complete object, never a bare
-// detection array, with every semantic field the patch schema requires.
+// contract is spelled out there too: a single complete semantic object, never
+// a bare detection array. Geometry is deliberately absent — the local ONNX
+// layer owns faces/subjectBox/subjectContour — which keeps the prompt light
+// (back to the 4-15s range instead of the 60s+ contour-aware prompt).
 const OUTPUT_CONTRACT_INSTRUCTION =
-  "Answer with a single JSON object (never an array) containing contentType, faces (up to 12 face/head boxes, empty array when none), subjectBox, saliencyCenter, styleTags (up to 8 concise style tags), bestUse, cropSafety, and subjectContour (an object with grid: exactly 576 characters of 0/1 for a 24x24 row-major occupancy grid where 1 marks a subject cell, gridSize: 24, subjectPolygon: up to 48 normalized 0-1 vertices for a single subject or null, and subjectAreaRatio: 0-1), matching the provided JSON schema.";
+  "Answer with a single JSON object (never an array) containing contentType, styleTags (up to 8 concise style tags), bestUse, cropSafety, and saliencyCenter (the normalized 0-1 point a viewer's eye lands on first, or null when unclear), matching the provided JSON schema.";
 
 // Appended on the one retry after an empty detection array, per the observed
 // relay failure mode where the model returns no box at all when uncertain.
@@ -926,7 +686,7 @@ export class OpenAICompatibleVisionProvider implements VisionProvider {
         {
           role: "system",
           content:
-            "Analyze wallpaper composition only. Return normalized 0-1 boxes and JSON only. Never identify a person.",
+            "Analyze wallpaper composition semantics only. Return normalized 0-1 coordinates and JSON only. Never identify a person.",
         },
         {
           role: "user",
@@ -980,8 +740,9 @@ export function createVisionProviderFromEnvironment(
   if (!apiKey || !model) {
     return null;
   }
-  // The contour-aware prompt (24x24 grid + polygon + face boxes) makes real
-  // vision calls take 60s+ on fast vision models; 20s never completes.
+  // The semantic-only prompt (geometry moved to the local ONNX layer) is back
+  // to the lightweight 4-15s range; the default stays at the previously
+  // raised 90s so slow relays keep working without configuration changes.
   const timeout = Number(environment.VISION_TIMEOUT_MS ?? "90000");
   return new OpenAICompatibleVisionProvider({
     apiKey,
@@ -992,21 +753,27 @@ export function createVisionProviderFromEnvironment(
   });
 }
 
-// The contour fields are not yet part of ImageAssetAnalysis (packages/core
-// protocol), so the merged object carries them past the declared type: the
-// zod imageAssetAnalysisSchema is non-strict and strips (not rejects) the
-// extra key, keeping every existing merge/persist path behavior unchanged.
+// Merges the VLM's semantic patch over the (already geometry-merged) basic
+// analysis: semantic fields override the pixel-derived defaults, while
+// saliencyCenter — the only field the VLM may still carry that is geometry —
+// only fills a gap. A saliencyCenter already present on `basic` (e.g. the
+// local vision layer's mask centroid, merged before this call) always wins.
 export function mergeVisionAnalysis(
   basic: ImageAssetAnalysis,
   patch: VisionAnalysisPatch & { analysisWarnings?: string[] },
-): ImageAssetAnalysis & { subjectContour?: SubjectContour } {
+): ImageAssetAnalysis {
   // analysisWarnings is the provider's observability channel, not a semantic
   // analysis field: strip it so the merged analysis stays schema-clean.
-  const { analysisWarnings: _providerWarnings, ...semantic } = patch;
+  const {
+    analysisWarnings: _providerWarnings,
+    saliencyCenter,
+    ...semantic
+  } = patch;
   return {
     ...basic,
     ...semantic,
-    subjectBox: semantic.subjectBox ?? undefined,
-    subjectContour: semantic.subjectContour ?? undefined,
+    ...(saliencyCenter !== undefined && basic.saliencyCenter === undefined
+      ? { saliencyCenter }
+      : {}),
   };
 }

@@ -17,6 +17,12 @@ import sharp from "sharp";
 import { z } from "zod";
 
 import {
+  createLocalVision,
+  isLocalVisionEnabled,
+  type LocalSubjectContour,
+  type LocalVision,
+} from "./localVision.ts";
+import {
   createVisionProviderFromEnvironment,
   mergeVisionAnalysis,
   type VisionProvider,
@@ -64,6 +70,13 @@ export interface TemporaryAssetStoreOptions {
   now?: Date;
   ttlMs?: number;
   visionProvider?: VisionProvider | null;
+  /**
+   * Local geometry layer override (LOCAL_VISION_ENABLED, default on).
+   * undefined resolves the default instance behind the env switch; null
+   * disables the layer entirely, keeping the pre-local-layer pipeline
+   * byte-identical; an injected instance is used as-is.
+   */
+  localVision?: LocalVision | null;
 }
 
 export class TemporaryAssetError extends Error {
@@ -234,20 +247,155 @@ function summarizeVisionFailure(error: unknown) {
   return bounded ? ` Reason: ${bounded}` : "";
 }
 
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
+}
+
+// Geometry the local ONNX layer contributes. Every field is optional: a
+// sub-layer that fails simply stays absent, which is exactly the field set
+// the pixel-only analysis used to produce.
+interface LocalGeometryPatch {
+  faces?: Array<{ x: number; y: number; width: number; height: number }>;
+  subjectBox?: { x: number; y: number; width: number; height: number };
+  saliencyCenter?: { x: number; y: number };
+  // saliencyCenter is stripped: it is hoisted to the analysis level (the
+  // core subjectContour schema would drop it anyway, and the analysis-level
+  // local value must win over any VLM fallback).
+  subjectContour?: Omit<LocalSubjectContour, "saliencyCenter">;
+}
+
+async function runFaceLayer(
+  localVision: LocalVision,
+  buffer: Buffer,
+  mimeType: TemporaryAssetRecord["mimeType"],
+): Promise<{ geometry: LocalGeometryPatch; warning: string }> {
+  const startedAt = performance.now();
+  try {
+    const faces = await localVision.detectFaces(buffer, mimeType);
+    const elapsed = elapsedMs(startedAt);
+    return {
+      geometry:
+        faces.length > 0
+          ? {
+              faces: faces.map(({ x, y, width, height }) => ({
+                x,
+                y,
+                width,
+                height,
+              })),
+            }
+          : {},
+      warning:
+        faces.length > 0
+          ? `Local face detection returned ${faces.length} face(s) in ${elapsed}ms.`
+          : `Local face detection found no faces in ${elapsed}ms.`,
+    };
+  } catch (error) {
+    const elapsed = elapsedMs(startedAt);
+    return {
+      geometry: {},
+      warning: `Local face detection failed after ${elapsed}ms; no face boxes were recorded.${summarizeVisionFailure(error)}`,
+    };
+  }
+}
+
+async function runContourLayer(
+  localVision: LocalVision,
+  buffer: Buffer,
+  mimeType: TemporaryAssetRecord["mimeType"],
+): Promise<{ geometry: LocalGeometryPatch; warning: string }> {
+  const startedAt = performance.now();
+  try {
+    const contour = await localVision.extractSubjectContour(
+      buffer,
+      mimeType,
+    );
+    const elapsed = elapsedMs(startedAt);
+    // null means the model found no subject (the disabled case never reaches
+    // this layer): record the empty outcome without geometry fields.
+    if (contour === null) {
+      return {
+        geometry: {},
+        warning: `Local subject segmentation found no subject in ${elapsed}ms.`,
+      };
+    }
+    const { saliencyCenter, ...persistableContour } = contour;
+    return {
+      geometry: {
+        subjectContour: persistableContour,
+        ...(contour.subjectBox !== null
+          ? { subjectBox: contour.subjectBox }
+          : {}),
+        ...(saliencyCenter !== null ? { saliencyCenter } : {}),
+      },
+      warning: `Local subject segmentation returned a subject contour in ${elapsed}ms.`,
+    };
+  } catch (error) {
+    const elapsed = elapsedMs(startedAt);
+    return {
+      geometry: {},
+      warning: `Local subject segmentation failed after ${elapsed}ms; pixel-only geometry was kept.${summarizeVisionFailure(error)}`,
+    };
+  }
+}
+
+// Layer 1 of the enrichment pipeline: local ONNX models (YuNet faces +
+// ISNet subject contour) produce every geometry field. Each sub-layer is
+// independently observable through analysisWarnings (success or degradation
+// with elapsed time); a failure degrades to the pixel-analysis field set
+// instead of blocking the upload. A disabled layer (options.localVision
+// null or LOCAL_VISION_ENABLED=false) contributes neither fields nor
+// warnings, keeping the pre-local-layer pipeline identical.
+async function runLocalVisionLayer(
+  buffer: Buffer,
+  mimeType: TemporaryAssetRecord["mimeType"],
+  options: TemporaryAssetStoreOptions,
+): Promise<LocalGeometryPatch & { warnings: string[] }> {
+  const localVision =
+    options.localVision === undefined
+      ? isLocalVisionEnabled()
+        ? createLocalVision()
+        : null
+      : options.localVision;
+  if (localVision === null) {
+    return { warnings: [] };
+  }
+  const [faceLayer, contourLayer] = await Promise.all([
+    runFaceLayer(localVision, buffer, mimeType),
+    runContourLayer(localVision, buffer, mimeType),
+  ]);
+  return {
+    ...faceLayer.geometry,
+    ...contourLayer.geometry,
+    warnings: [faceLayer.warning, contourLayer.warning],
+  };
+}
+
 async function enrichWithVision(
   buffer: Buffer,
   basicAnalysis: ReturnType<typeof analyzePixels>,
+  mimeType: TemporaryAssetRecord["mimeType"],
   options: TemporaryAssetStoreOptions,
 ) {
+  const { warnings: localWarnings, ...localGeometry } =
+    await runLocalVisionLayer(buffer, mimeType, options);
+  // Local geometry is merged first so mergeVisionAnalysis can both override
+  // the pixel-derived semantic defaults with VLM values and treat an already
+  // present saliencyCenter as authoritative over any VLM fallback point.
+  const geometryAnalysis =
+    Object.keys(localGeometry).length > 0
+      ? { ...basicAnalysis, ...localGeometry }
+      : basicAnalysis;
+
   const provider =
     options.visionProvider === undefined
       ? createVisionProviderFromEnvironment()
       : options.visionProvider;
   if (!provider) {
     return {
-      analysis: basicAnalysis,
+      analysis: geometryAnalysis,
       source: "basic" as const,
-      warnings: [] as string[],
+      warnings: localWarnings,
     };
   }
   try {
@@ -264,15 +412,16 @@ async function enrichWithVision(
       basicAnalysis,
     });
     return {
-      analysis: mergeVisionAnalysis(basicAnalysis, patch),
+      analysis: mergeVisionAnalysis(geometryAnalysis, patch),
       source: "vision" as const,
-      warnings: [] as string[],
+      warnings: [...localWarnings, ...(patch.analysisWarnings ?? [])],
     };
   } catch (error) {
     return {
-      analysis: basicAnalysis,
+      analysis: geometryAnalysis,
       source: "basic" as const,
       warnings: [
+        ...localWarnings,
         `${VISION_FALLBACK_WARNING_PREFIX}.${summarizeVisionFailure(error)}`,
       ],
     };
@@ -383,7 +532,12 @@ export async function storeTemporaryAsset(
     now.getTime() + (options.ttlMs ?? DAY_MS),
   );
   const basicAnalysis = await analyzeBuffer(id, buffer, width, height);
-  const enriched = await enrichWithVision(buffer, basicAnalysis, options);
+  const enriched = await enrichWithVision(
+    buffer,
+    basicAnalysis,
+    detectedMimeType,
+    options,
+  );
   const root = storageRoot(options);
   const assetPaths = pathsFor(root, id);
   await mkdir(root, { recursive: true, mode: 0o700 });
