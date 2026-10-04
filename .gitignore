@@ -36,3 +36,4 @@ plan/_*_raw.json
 
 # Temporary working files (mail watch state, scratch)
 temp/
+models/
