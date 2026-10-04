@@ -9,7 +9,7 @@
  *     verified in temp/spike/face-spike.mjs (remote ETag equals the sha256
  *     below, i.e. the upstream blob is byte-identical to the spike-tested file)
  *
- *   isnet-general-use.onnx  subject contour segmentation
+ *   isnet-anime.onnx         subject contour segmentation (SkyTNT/anime-segmentation)
  *     source: danielgatis/rembg GitHub release v0.0.0 asset
  *     verified in temp/spike/contour-spike.mjs
  *
@@ -41,12 +41,12 @@ const MODELS = [
       "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
   },
   {
-    file: "isnet-general-use.onnx",
-    url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
-    source: "danielgatis/rembg release v0.0.0 asset",
-    bytes: 178648008,
+    file: "isnet-anime.onnx",
+    url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-anime.onnx",
+    source: "danielgatis/rembg release v0.0.0 asset (SkyTNT/anime-segmentation, Apache-2.0)",
+    bytes: 176069933,
     sha256:
-      "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
+      "f15622d853e8260172812b657053460e20806f04b9e05147d49af7bed31a6e99",
   },
 ];
 

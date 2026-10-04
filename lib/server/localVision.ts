@@ -24,9 +24,9 @@ const YUNET_MODEL_FILE = "yunet_2023mar.onnx";
 const YUNET_INPUT_SIZE = 640;
 const YUNET_STRIDES = [8, 16, 32];
 
-const ISNET_MODEL_FILE = "isnet-general-use.onnx";
+const ISNET_MODEL_FILE = "isnet-anime.onnx";
 const ISNET_INPUT_SIZE = 1024;
-// rembg sessions/dis_general_use.py normalization constants.
+// rembg sessions/isnet_anime.py normalization constants (same as DIS family).
 const ISNET_CHANNEL_MEAN = [0.5, 0.5, 0.5];
 const ISNET_CHANNEL_STD = [1, 1, 1];
 
