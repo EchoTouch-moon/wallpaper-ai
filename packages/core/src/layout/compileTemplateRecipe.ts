@@ -1,5 +1,8 @@
 import { wallpaperTemplateSchema } from "./layoutSchema.ts";
-import { calculateCoverCrop } from "./planTemplate.ts";
+import {
+  calculateCoverCrop,
+  planDiagonalCollageSlots,
+} from "./planTemplate.ts";
 import { templateRecipeSchema } from "./templateRecipe.ts";
 
 import type {
@@ -663,6 +666,8 @@ function typeForRecipe(recipe: TemplateRecipe): TemplateType {
       return "stacked-story";
     case "layered-collage":
       return "layered-moodboard";
+    case "diagonal-collage":
+      return "diagonal-collage";
     case "triptych":
       return "triptych";
   }
@@ -1178,7 +1183,16 @@ export function compileTemplateRecipe(
   if (!Number.isInteger(input.assetCount) || input.assetCount < 2) {
     throw new Error("Template recipes require at least two assets");
   }
-  const count = Math.min(input.assetCount, recipe.supportCount + 1, 6);
+  const count = Math.min(
+    input.assetCount,
+    // diagonal-collage slots are 2 heroes + supportCount supports; the other
+    // families are 1 hero + supportCount supports. A short asset count drops
+    // the trailing support slots in order (never a hero, never an error).
+    recipe.family === "diagonal-collage"
+      ? recipe.supportCount + 2
+      : recipe.supportCount + 1,
+    6,
+  );
   const portrait = input.height > input.width;
   const content = insetRect(
     { x: 0, y: 0, width: 1, height: 1 },
@@ -1200,6 +1214,15 @@ export function compileTemplateRecipe(
     case "layered-collage":
       slots = layeredSlots(content, count, recipe, portrait);
       break;
+    case "diagonal-collage":
+      slots = planDiagonalCollageSlots({
+        recipe,
+        count,
+        content,
+        width: input.width,
+        height: input.height,
+      });
+      break;
   }
 
   slots = applySlotIntents(slots, recipe, input);
@@ -1210,7 +1233,10 @@ export function compileTemplateRecipe(
       input.safeAreas,
       input.width,
       input.height,
-      recipe.family === "layered-collage",
+      // Overlap-by-design families keep their deliberate stacking; only the
+      // safe-area intersections get repaired.
+      recipe.family === "layered-collage" ||
+        recipe.family === "diagonal-collage",
     );
   }
 

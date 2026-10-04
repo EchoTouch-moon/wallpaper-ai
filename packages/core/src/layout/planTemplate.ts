@@ -14,10 +14,12 @@ import type {
   WallpaperTemplate,
 } from "../types/layout.ts";
 import type { SafeAreaType, WallpaperRatioId } from "../types/wallpaper.ts";
-import type {
-  CropFocus,
-  CropZoom,
-  TemplateRecipe,
+import {
+  diagonalCollageParamsSchema,
+  type CropFocus,
+  type CropZoom,
+  type SlotTreatment,
+  type TemplateRecipe,
 } from "./templateRecipe.ts";
 import { createSafeAreas } from "../wallpaper/layoutSafeAreas.ts";
 
@@ -518,6 +520,219 @@ export function calculateCoverCrop(
   };
 }
 
+// ---------------------------------------------------------------------------
+// diagonal-collage compile branch: two hero slots pin the two ends of a
+// canvas diagonal (bottom-left / top-right by default — the reference
+// alignment), and N support cards chain along the axis between the hero
+// centers with alternating z order and a lateral stagger, so consecutive
+// cards interleave (交错叠压). All geometry is closed-form arithmetic over
+// the recipe parameters and the canvas pixel size — same input, same output,
+// no iteration, no randomness.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fraction of a support card's extent kept clear of its neighbor when sizing
+ * the lateral stagger — guarantees consecutive cards still overlap after the
+ * diagonal projection, for every legal `overlap` value.
+ */
+const DIAGONAL_OVERLAP_HEADROOM = 0.94;
+/** Hard cap on the lateral stagger, in units of the smaller support extent. */
+const DIAGONAL_MAX_LATERAL_RATIO = 0.35;
+/** Numeric floor below which an axis component counts as degenerate. */
+const DIAGONAL_AXIS_EPS = 1e-6;
+
+function roundNormalized(value: number) {
+  return Number(value.toFixed(5));
+}
+
+interface PixelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function clampIntoPixelRect(rect: PixelRect, bounds: PixelRect): PixelRect {
+  const width = Math.min(Math.max(rect.width, 1), bounds.width);
+  const height = Math.min(Math.max(rect.height, 1), bounds.height);
+  return {
+    x: clamp(rect.x, bounds.x, bounds.x + bounds.width - width),
+    y: clamp(rect.y, bounds.y, bounds.y + bounds.height - height),
+    width,
+    height,
+  };
+}
+
+/** Converts a pixel-space rect into a normalized 5-decimal template slot. */
+function diagonalSlot(
+  id: string,
+  rect: PixelRect,
+  role: TemplateSlot["role"],
+  zIndex: number,
+  recipe: TemplateRecipe,
+  width: number,
+  height: number,
+): TemplateSlot {
+  const normalizedWidth = roundNormalized(
+    Math.min(1, Math.max(0.01, rect.width / width)),
+  );
+  const normalizedHeight = roundNormalized(
+    Math.min(1, Math.max(0.01, rect.height / height)),
+  );
+  return {
+    id,
+    x: roundNormalized(clamp(rect.x / width, 0, 1 - normalizedWidth)),
+    y: roundNormalized(clamp(rect.y / height, 0, 1 - normalizedHeight)),
+    width: normalizedWidth,
+    height: normalizedHeight,
+    rotation: 0,
+    zIndex,
+    role,
+    shape: recipe.cornerRadius > 0 ? "rounded-rect" : "rect",
+    // Omit the key for square corners — an explicit `radius: undefined`
+    // breaks JSON round-trip deep-equality against the compiled template.
+    ...(recipe.cornerRadius > 0
+      ? { radius: recipe.cornerRadius }
+      : {}),
+  };
+}
+
+export interface DiagonalCollageSlotInput {
+  recipe: TemplateRecipe;
+  /**
+   * Total slot count: always the two heroes plus `count - 2` support cards.
+   * When assets run short, the caller lowers `count` and the trailing
+   * support slots (highest numbers) are the ones dropped — supports fall in
+   * order, the heroes never do.
+   */
+  count: number;
+  /** Normalized content rect (margin / safe-area policy already applied). */
+  content: { x: number; y: number; width: number; height: number };
+  /** Canvas pixel size — the diagonal is only geometric in pixel space. */
+  width: number;
+  height: number;
+}
+
+export function planDiagonalCollageSlots({
+  recipe,
+  count,
+  content,
+  width,
+  height,
+}: DiagonalCollageSlotInput): TemplateSlot[] {
+  const params = diagonalCollageParamsSchema.parse(recipe.diagonal ?? {});
+  const supportTotal = Math.max(0, Math.min(count - 2, recipe.supportCount));
+
+  const bounds: PixelRect = {
+    x: content.x * width,
+    y: content.y * height,
+    width: content.width * width,
+    height: content.height * height,
+  };
+
+  // Heroes flush into the two corners the axis connects.
+  const heroWidth = params.heroShare * bounds.width;
+  const heroHeight = params.heroShare * bounds.height;
+  const bottomLeftToTopRight = params.axis === "bl-tr";
+  const heroRect: PixelRect = {
+    x: bounds.x,
+    y: bottomLeftToTopRight ? bounds.y + bounds.height - heroHeight : bounds.y,
+    width: heroWidth,
+    height: heroHeight,
+  };
+  const hero2Rect: PixelRect = {
+    x: bounds.x + bounds.width - heroWidth,
+    y: bottomLeftToTopRight ? bounds.y : bounds.y + bounds.height - heroHeight,
+    width: heroWidth,
+    height: heroHeight,
+  };
+
+  const slots = [
+    diagonalSlot("hero", heroRect, "hero", 3, recipe, width, height),
+    diagonalSlot("hero-2", hero2Rect, "hero", 4, recipe, width, height),
+  ];
+  if (supportTotal === 0) {
+    return slots;
+  }
+
+  // Support chain between the hero centers, in pixel space.
+  const startX = heroRect.x + heroWidth / 2;
+  const startY = heroRect.y + heroHeight / 2;
+  const endX = hero2Rect.x + heroWidth / 2;
+  const endY = hero2Rect.y + heroHeight / 2;
+  const axisX = endX - startX;
+  const axisY = endY - startY;
+  const axisLength = Math.hypot(axisX, axisY);
+  const dir = { x: axisX / axisLength, y: axisY / axisLength };
+  const perp = { x: -dir.y, y: dir.x };
+  const midX = (startX + endX) / 2;
+  const midY = (startY + endY) / 2;
+
+  const supportWidth = params.supportShare * bounds.width;
+  const supportHeight = params.supportShare * bounds.height;
+  // Full projection of a support card onto the axis; consecutive centers sit
+  // one (1 − overlap) span apart, so overlap stacks them by `overlap` spans.
+  const span =
+    Math.abs(dir.x) * supportWidth + Math.abs(dir.y) * supportHeight;
+  const stride = span * (1 - params.overlap);
+
+  // Lateral stagger, capped so consecutive cards provably overlap: the
+  // center delta is dir·stride ± perp·2·lateral, bounded per axis by
+  // |Δx| ≤ headroom·supportWidth and |Δy| ≤ headroom·supportHeight.
+  // A degenerate axis component voids its bound (the perpendicular no
+  // longer projects onto that axis).
+  const lateralX =
+    Math.abs(dir.y) < DIAGONAL_AXIS_EPS
+      ? Infinity
+      : (DIAGONAL_OVERLAP_HEADROOM * supportWidth -
+          Math.abs(dir.x) * stride) /
+        (2 * Math.abs(dir.y));
+  const lateralY =
+    Math.abs(dir.x) < DIAGONAL_AXIS_EPS
+      ? Infinity
+      : (DIAGONAL_OVERLAP_HEADROOM * supportHeight -
+          Math.abs(dir.y) * stride) /
+        (2 * Math.abs(dir.x));
+  const lateral = Math.max(
+    0,
+    Math.min(
+      lateralX,
+      lateralY,
+      DIAGONAL_MAX_LATERAL_RATIO * Math.min(supportWidth, supportHeight),
+    ),
+  );
+
+  for (let index = 0; index < supportTotal; index += 1) {
+    const offset = (index - (supportTotal - 1) / 2) * stride;
+    const side = index % 2 === 0 ? 1 : -1;
+    const centerX = midX + dir.x * offset + perp.x * side * lateral;
+    const centerY = midY + dir.y * offset + perp.y * side * lateral;
+    const rect = clampIntoPixelRect(
+      {
+        x: centerX - supportWidth / 2,
+        y: centerY - supportHeight / 2,
+        width: supportWidth,
+        height: supportHeight,
+      },
+      bounds,
+    );
+    // z order alternates down the chain (1, 2, 1, 2 …): each adjacent pair
+    // stacks the opposite way — 交错叠压.
+    slots.push(
+      diagonalSlot(
+        `support-${index + 1}`,
+        rect,
+        "support",
+        1 + (index % 2),
+        recipe,
+        width,
+        height,
+      ),
+    );
+  }
+  return slots;
+}
+
 function createItemStyle(template: WallpaperTemplate, slotIndex: number) {
   if (template.type === "layered-moodboard") {
     return {
@@ -564,6 +779,10 @@ function boundaryForTemplate(template: WallpaperTemplate) {
 
   if (template.type === "layered-moodboard") {
     return { type: "overlap" as const, gap: 0, radius: 32, width: 0 };
+  }
+
+  if (template.type === "diagonal-collage") {
+    return { type: "overlap" as const, gap: 0, radius: 0, width: 0 };
   }
 
   if (template.type === "irregular-collage") {
@@ -622,6 +841,12 @@ function backgroundColorForTemplate(
 
   if (template.type === "layered-moodboard") {
     return analyses[0]?.averageColor ?? "#20242d";
+  }
+
+  // Registered diagonal-collage presets carry the reference olive ground;
+  // recipe-generated diagonal collages read it from `diagonal.backgroundColor`.
+  if (template.type === "diagonal-collage") {
+    return "#4A5D3A";
   }
 
   return "#f4f3ed";
@@ -709,9 +934,15 @@ function createLayoutItem(
   analysis: ImageAssetAnalysis,
   canvasSize: CanvasSize,
   templateIndex: number,
+  treatment: SlotTreatment = "crop",
 ): WallpaperItem {
   const width = Math.round(slot.width * canvasSize.width);
   const height = Math.round(slot.height * canvasSize.height);
+
+  // Protocol coherence (layoutSchema's treatment vocabulary): full = contain
+  // without cropping, cutout = subject only — neither may carry a cover crop
+  // box nor fit "cover"; crop keeps the historical cover behavior.
+  const uncropped = treatment === "full" || treatment === "cutout";
 
   return {
     id: `layout_${templateIndex + 1}_${slot.id}`,
@@ -725,8 +956,9 @@ function createLayoutItem(
     rotation: slot.rotation,
     zIndex: slot.zIndex,
     opacity: slot.role === "decorative" ? 0.92 : 1,
-    fit: "cover",
-    crop: calculateCoverCrop(analysis, width, height),
+    fit: uncropped ? "contain" : "cover",
+    treatment,
+    ...(uncropped ? {} : { crop: calculateCoverCrop(analysis, width, height) }),
     mask: {
       type: slot.shape,
       radius:
@@ -965,6 +1197,13 @@ export function planTemplateCandidate({
     ),
   };
   const assetsBySlot = selectAssetsForSlots(planningTemplate, analyses);
+  // Slot treatments pass through from the recipe's slotIntents verbatim;
+  // slots without an intent (or without a recipe at all) keep "crop".
+  const treatmentBySlot = new Map<string, SlotTreatment>(
+    Object.entries(templateRecipe?.slotIntents ?? {}).map(
+      ([slotId, intent]) => [slotId, intent.treatment],
+    ),
+  );
   const items = planningTemplate.slots.map((slot, slotIndex) => {
     const analysis = assetsBySlot.get(slot.id);
     if (!analysis) {
@@ -977,6 +1216,7 @@ export function planTemplateCandidate({
       analysis,
       canvasSize,
       templateIndex,
+      treatmentBySlot.get(slot.id) ?? "crop",
     );
   });
   const focalAssetId =
@@ -988,6 +1228,13 @@ export function planTemplateCandidate({
     }, 0) / Math.max(items.length, 1),
   );
   const usage = usageForRatio(ratioId);
+  // The diagonal-collage family owns its solid ground color through the
+  // recipe (absent param = transparent); every other family keeps the
+  // per-template analysis-derived default.
+  const backgroundColor =
+    templateRecipe?.family === "diagonal-collage"
+      ? templateRecipe.diagonal?.backgroundColor ?? "transparent"
+      : backgroundColorForTemplate(template, analyses);
   const layout = wallpaperLayoutSchema.parse({
     version: "1.0",
     canvas: {
@@ -995,7 +1242,7 @@ export function planTemplateCandidate({
       height: canvasSize.height,
       ratio: ratioId,
       usage,
-      backgroundColor: backgroundColorForTemplate(template, analyses),
+      backgroundColor,
     },
     template: {
       id: template.id,

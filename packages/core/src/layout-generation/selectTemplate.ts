@@ -106,6 +106,9 @@ export function selectTemplateTypes(request: GenerateLayoutRequest): TemplateTyp
     "layered-moodboard",
     "irregular-collage",
     "portrait-triptych",
+    // Newer families rank last until a signal promotes them: an unlisted
+    // type would get indexOf -1 and sort ahead of every preferred type.
+    "diagonal-collage",
   ];
 
   return [...new Set(ordered)];

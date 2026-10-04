@@ -1,8 +1,54 @@
 import { wallpaperTemplateSchema } from "./layoutSchema.ts";
+import { planDiagonalCollageSlots } from "./planTemplate.ts";
+import type { TemplateRecipe } from "./templateRecipe.ts";
 import type { WallpaperTemplate } from "../types/layout.ts";
 
 const DESKTOP_RATIOS = ["16:9", "16:10", "21:9"];
 const MOBILE_RATIOS = ["9:16", "9:19.5"];
+
+/**
+ * Reference-aligned diagonal-collage recipe: olive ground, bottom-left →
+ * top-right axis, two large heroes + three staggered supports, square
+ * corners, no shadow. Registered presets compile their fixed slot geometry
+ * through the same deterministic branch the recipe compiler uses, so preset
+ * and generated geometry can never drift apart.
+ */
+const DIAGONAL_COLLAGE_REFERENCE: TemplateRecipe = {
+  version: "1.0",
+  profile: "editorial",
+  family: "diagonal-collage",
+  heroPosition: "center",
+  heroShare: 0.46,
+  supportCount: 3,
+  margin: 0.03,
+  gap: 0.012,
+  cornerRadius: 0,
+  rhythm: "layered",
+  boundary: "overlap",
+  safeAreaPolicy: "soft-avoid",
+  diagonal: {
+    axis: "bl-tr",
+    heroShare: 0.46,
+    supportShare: 0.24,
+    overlap: 0.3,
+  },
+};
+
+function diagonalCollagePresetSlots(width: number, height: number) {
+  const inset = DIAGONAL_COLLAGE_REFERENCE.margin;
+  return planDiagonalCollageSlots({
+    recipe: DIAGONAL_COLLAGE_REFERENCE,
+    count: 5,
+    content: {
+      x: inset,
+      y: inset,
+      width: 1 - inset * 2,
+      height: 1 - inset * 2,
+    },
+    width,
+    height,
+  });
+}
 
 const rawTemplates: WallpaperTemplate[] = [
   {
@@ -137,6 +183,28 @@ const rawTemplates: WallpaperTemplate[] = [
       { id: "support_top", x: 0.12, y: 0.56, width: 0.47, height: 0.2, rotation: 2, zIndex: 2, role: "support", shape: "rounded-rect", radius: 0.026 },
       { id: "support_bottom", x: 0.35, y: 0.72, width: 0.52, height: 0.19, rotation: -2, zIndex: 2, role: "support", shape: "rounded-rect", radius: 0.026 },
     ],
+  },
+  {
+    // Reference alignment: 3:4 portrait, olive ground (#4A5D3A via
+    // backgroundColorForTemplate), bottom-left → top-right diagonal, 2 heroes
+    // + 3 interleaved supports, square corners, no shadow. Title bars and
+    // elliptical accents stay out of the protocol (styleNotes territory).
+    id: "diagonal_collage_mobile",
+    name: "Olive Diagonal Collage",
+    type: "diagonal-collage",
+    supportedRatios: MOBILE_RATIOS,
+    minImages: 5,
+    maxImages: 5,
+    slots: diagonalCollagePresetSlots(1536, 2048),
+  },
+  {
+    id: "diagonal_collage_desktop",
+    name: "Diagonal Collage",
+    type: "diagonal-collage",
+    supportedRatios: DESKTOP_RATIOS,
+    minImages: 5,
+    maxImages: 5,
+    slots: diagonalCollagePresetSlots(1920, 1080),
   },
 ];
 
