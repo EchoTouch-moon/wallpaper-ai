@@ -981,6 +981,13 @@ export function OneTouchStudio() {
             width: 1,
             height: 1,
           };
+          // treatment=full / fit=contain: draw the whole source contained in
+          // the slot, centered — no crop (protocol: full = contain without
+          // cropping). cutout items also land here: the browser export has no
+          // server-side subject mask, and contain keeps the whole subject
+          // visible instead of letting a cover crop slice it.
+          const contain =
+            item.fit === "contain" || item.treatment === "full";
           const centerX = item.x + item.width / 2;
           const centerY = item.y + item.height / 2;
           context.save();
@@ -997,17 +1004,33 @@ export function OneTouchStudio() {
           );
           context.clip();
           context.globalAlpha = item.opacity;
-          context.drawImage(
-            image,
-            crop.x * image.naturalWidth,
-            crop.y * image.naturalHeight,
-            crop.width * image.naturalWidth,
-            crop.height * image.naturalHeight,
-            item.x,
-            item.y,
-            item.width,
-            item.height,
-          );
+          if (contain) {
+            const scale = Math.min(
+              item.width / image.naturalWidth,
+              item.height / image.naturalHeight,
+            );
+            const drawWidth = image.naturalWidth * scale;
+            const drawHeight = image.naturalHeight * scale;
+            context.drawImage(
+              image,
+              item.x + (item.width - drawWidth) / 2,
+              item.y + (item.height - drawHeight) / 2,
+              drawWidth,
+              drawHeight,
+            );
+          } else {
+            context.drawImage(
+              image,
+              crop.x * image.naturalWidth,
+              crop.y * image.naturalHeight,
+              crop.width * image.naturalWidth,
+              crop.height * image.naturalHeight,
+              item.x,
+              item.y,
+              item.width,
+              item.height,
+            );
+          }
           context.restore();
         });
 
