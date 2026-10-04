@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { templateRecipeSchema } from "./templateRecipe.ts";
+import { slotTreatmentSchema, templateRecipeSchema } from "./templateRecipe.ts";
 
 const normalizedNumberSchema = z.number().min(0).max(1);
 
@@ -115,6 +115,7 @@ export const templateTypeSchema = z.enum([
   "hero-grid",
   "balanced-mosaic",
   "stacked-story",
+  "diagonal-collage",
 ]);
 
 export const cropConfigSchema = normalizedBoxSchema.extend({
@@ -224,6 +225,11 @@ export const wallpaperItemSchema = z.object({
   zIndex: z.number().int(),
   opacity: normalizedNumberSchema,
   fit: z.enum(["cover", "contain"]),
+  // Raster treatment passthrough (same vocabulary as recipe slotIntents):
+  // full = contain without cropping, crop = existing cover crop,
+  // cutout = background removed, subject only. Defaults to "crop" so
+  // layouts produced before this field existed parse unchanged.
+  treatment: slotTreatmentSchema.default("crop"),
   crop: cropConfigSchema.optional(),
   mask: maskConfigSchema.optional(),
   style: itemStyleSchema.optional(),
@@ -266,7 +272,10 @@ export const wallpaperLayoutSchema = z
       height: z.number().int().positive(),
       ratio: z.string().min(1),
       usage: z.enum(["desktop", "mobile", "ultrawide", "custom"]),
-      backgroundColor: z.string().min(1),
+      // Solid canvas fill. "transparent" (the default when omitted) means no
+      // solid background layer — existing layouts that always emit a hex
+      // color parse unchanged.
+      backgroundColor: z.string().min(1).default("transparent"),
     }),
     template: z
       .object({
