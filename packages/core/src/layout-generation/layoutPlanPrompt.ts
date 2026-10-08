@@ -66,6 +66,7 @@ export const AI_LAYOUT_PLAN_JSON_SCHEMA = {
                       "triptych",
                       "stacked-story",
                       "layered-collage",
+                      "diagonal-collage",
                     ],
                   },
                   heroPosition: {
@@ -306,6 +307,17 @@ const REFINE_PLANNING_RULES = [
   "For refine operations, treat previousCandidates as the layouts to improve: keep what already works, apply the refineInstruction as a localized change, and keep the brief constraints unchanged.",
 ] as const;
 
+// Style anchoring (style-library pinned briefs): the anchor names a
+// reverse-engineered reference style. These rules only join the system
+// message when the request actually carries a styleAnchor, so unstyled
+// prompts stay byte-identical to the pre-anchor behavior.
+const STYLE_ANCHOR_PLANNING_RULES = [
+  "A styleAnchor pins the composition to a reverse-engineered reference style: every candidate MUST use the anchor family exactly; never substitute another family.",
+  "Follow the anchor slot structure: keep its heroPosition, heroShare, supportCount, rhythm, boundary, layering, and slotIntents outline, adjusting only the minimum that hard constraints (safe areas, heroAssetId, asset count) force.",
+  "A diagonal-collage anchor carries two hero slots: use slot IDs hero and hero-2 plus support-1 onward, and set recipe supportCount to the number of assets minus two.",
+  "Obey the styleNotes constraints and taboos verbatim: they record what the reference style must keep and what it must never do; where a styleNote conflicts with a brief hard constraint, the brief constraint wins.",
+] as const;
+
 export function createLayoutPlanMessages(input: LayoutModelRequest) {
   const { request, operation } = input;
   const registeredTemplates = WALLPAPER_TEMPLATES.filter((template) =>
@@ -351,6 +363,7 @@ export function createPlanningRequestMessages(planning: PlanningRequest) {
       ...BRIEF_PLANNING_RULES,
       ...ASSET_ANALYSIS_RULES,
       ...SLOT_INTENT_PLANNING_RULES,
+      ...(planning.styleAnchor ? STYLE_ANCHOR_PLANNING_RULES : []),
       ...(operation === "refine" ? REFINE_PLANNING_RULES : []),
     ].join(" "),
     user: JSON.stringify({
@@ -360,6 +373,7 @@ export function createPlanningRequestMessages(planning: PlanningRequest) {
       heroAssetId: brief.intent.heroAssetId ?? null,
       brief,
       assets,
+      ...(planning.styleAnchor ? { styleAnchor: planning.styleAnchor } : {}),
       refineInstruction:
         operation === "refine" ? (planning.refineInstruction ?? null) : null,
       previousCandidates:

@@ -4,12 +4,14 @@ import {
   DEFAULT_TEMPLATE_RECIPES,
   templateRecipeSchema,
 } from "../layout/templateRecipe.ts";
+import { getStyle } from "../layout/styleLibrary.ts";
 import { wallpaperLayoutSchema } from "../layout/layoutSchema.ts";
 import { validateLayout } from "../layout/validateLayout.ts";
 import {
   compositionGenerationRequestSchema,
   compositionGenerationResponseSchema,
 } from "./compositionContracts.ts";
+import { selectDiverseLayoutCandidates } from "./candidateDiversity.ts";
 
 import { planningRatio, type CompositionBrief } from "./compositionBrief.ts";
 import type { CompositionGenerationRequest } from "./compositionContracts.ts";
@@ -477,7 +479,7 @@ function materializePlannedCandidate(
 
 export function generateCompositionCandidates(input: unknown) {
   const request = compositionGenerationRequestSchema.parse(input);
-  const candidates = DEFAULT_TEMPLATE_RECIPES.map((source, index) =>
+  const defaultCandidates = DEFAULT_TEMPLATE_RECIPES.map((source, index) =>
     createCompositionCandidateFromRecipe(
       request,
       recipeForBrief(source, request.brief, request.assets.length),
@@ -485,9 +487,51 @@ export function generateCompositionCandidates(input: unknown) {
     ),
   );
 
-  return compositionGenerationResponseSchema.parse({
-    candidates,
-    source: "recipe-fallback",
-    warnings: [],
-  });
+  // Locked style mode (brief.styleId + styleMode "locked"): the library
+  // recipe compiles deterministically as candidate 0 — no LLM, no
+  // brief-driven recipe adaptation, because the recipe IS the style. The
+  // deterministic defaults with distinct families complete the required set
+  // of three; an unknown styleId degrades to the plain defaults above.
+  const style =
+    request.brief.styleMode === "locked" && request.brief.styleId
+      ? getStyle(request.brief.styleId)
+      : undefined;
+  if (!style) {
+    return compositionGenerationResponseSchema.parse({
+      candidates: defaultCandidates,
+      source: "recipe-fallback",
+      warnings: [],
+    });
+  }
+
+  try {
+    const styleCandidate = {
+      ...createCompositionCandidateFromRecipe(request, style.recipe, 0),
+      id: `style_${style.id}`,
+      label: style.name,
+      reason: `Locked style "${style.name}" compiled deterministically from its reverse-engineered recipe (${style.sourceRef}).`,
+    };
+    const selection = selectDiverseLayoutCandidates(
+      [styleCandidate],
+      defaultCandidates,
+      3,
+    );
+    return compositionGenerationResponseSchema.parse({
+      candidates: selection.candidates,
+      source: "recipe-fallback",
+      warnings: [
+        `Style "${style.id}" locked: the recipe compiled deterministically; LLM planning is skipped.`,
+      ],
+    });
+  } catch (error) {
+    return compositionGenerationResponseSchema.parse({
+      candidates: defaultCandidates,
+      source: "recipe-fallback",
+      warnings: [
+        `Style "${style.id}" could not compile: ${
+          error instanceof Error ? error.message : String(error)
+        }; deterministic default recipes were used.`,
+      ],
+    });
+  }
 }

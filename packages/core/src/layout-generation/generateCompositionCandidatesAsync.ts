@@ -10,6 +10,7 @@ import {
   generateCompositionCandidates,
 } from "./generateCompositionCandidates.ts";
 import { getTemplate } from "../layout/templates.ts";
+import { getStyle } from "../layout/styleLibrary.ts";
 import { refineTemplateRecipe } from "./refineTemplateRecipe.ts";
 import {
   loadLayoutModelConfig,
@@ -99,6 +100,33 @@ export async function generateCompositionCandidatesAsync(
   const fallback = generateCompositionCandidates(request);
   const planningWarnings: string[] = [];
 
+  // Style-library pin (packages/core/src/layout/styleLibrary.ts). A styleId
+  // that is not in the library must stay observable and must never fail the
+  // request: record the miss and continue on the unstyled path.
+  const style = request.brief.styleId
+    ? getStyle(request.brief.styleId)
+    : undefined;
+  if (request.brief.styleId && !style) {
+    planningWarnings.push(
+      `Style "${request.brief.styleId}" is not in the style library; ${
+        request.brief.styleMode === "locked"
+          ? "locked compilation"
+          : "style anchoring"
+      } was skipped.`,
+    );
+  }
+
+  // Locked mode: the deterministic tier above already compiled the style
+  // recipe (candidate 0) with its warning recorded, so LLM planning — and
+  // even provider construction — is skipped entirely. The async response is
+  // exactly the deterministic one.
+  if (request.brief.styleMode === "locked" && style) {
+    return compositionGenerationResponseSchema.parse(fallback);
+  }
+
+  // Anchored mode (and the styleId-without-mode default): planning proceeds
+  // below; buildGeneratePlanningRequest derives the styleAnchor from the
+  // brief and layoutPlanPrompt injects it into the system rules and payload.
   try {
     const provider =
       dependencies.provider ??

@@ -2,6 +2,7 @@ export * from "./layoutTypes.ts";
 export * from "./layoutSchema.ts";
 export * from "./templates.ts";
 export * from "./templateRecipe.ts";
+export * from "./styleLibrary.ts";
 export * from "./compileTemplateRecipe.ts";
 export * from "./planTemplate.ts";
 export * from "./planTriptych.ts";

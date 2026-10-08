@@ -85,8 +85,28 @@ export const compositionBriefSchema = z
         cropTolerance: z.enum(["low", "medium", "high"]),
       })
       .strict(),
+    /**
+     * Optional style-library pin (packages/core/src/layout/styleLibrary.ts).
+     * Both fields are optional so pre-style briefs parse byte-identically.
+     *
+     * - "locked"   — the style recipe compiles deterministically; no LLM
+     *   planning, no brief-driven recipe adaptation.
+     * - "anchored" — LLM planning runs with the style anchor injected into
+     *   the planning prompt (default when styleId is set without a mode).
+     */
+    styleId: z.string().trim().min(1).max(64).optional(),
+    styleMode: z.enum(["locked", "anchored"]).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((brief, context) => {
+    if (brief.styleMode && !brief.styleId) {
+      context.addIssue({
+        code: "custom",
+        message: "styleMode requires a styleId from the style library",
+        path: ["styleMode"],
+      });
+    }
+  });
 
 export type CompositionTarget = z.infer<typeof compositionTargetSchema>;
 export type CompositionBrief = z.infer<typeof compositionBriefSchema>;
