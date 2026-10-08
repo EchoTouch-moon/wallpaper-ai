@@ -24,6 +24,10 @@ import type {
   LayoutCandidate,
   WallpaperItem,
 } from "@wallpaper/core/types";
+import {
+  computeSlotPlacement,
+  subjectPolygonOf,
+} from "@/lib/client/cutoutGeometry";
 
 import styles from "./OneTouchStudio.module.css";
 
@@ -967,6 +971,12 @@ export function OneTouchStudio() {
           images.set(asset.id, await loadImage(asset.contentUrl));
         }),
       );
+      const polygonByAssetId = new Map(
+        assets.flatMap((asset) => {
+          const polygon = subjectPolygonOf(asset.analysis);
+          return polygon ? ([[asset.id, polygon]] as const) : [];
+        }),
+      );
 
       [...layout.items]
         .sort((left, right) => left.zIndex - right.zIndex)
@@ -981,13 +991,32 @@ export function OneTouchStudio() {
             width: 1,
             height: 1,
           };
-          // treatment=full / fit=contain: draw the whole source contained in
-          // the slot, centered — no crop (protocol: full = contain without
-          // cropping). cutout items also land here: the browser export has no
-          // server-side subject mask, and contain keeps the whole subject
-          // visible instead of letting a cover crop slice it.
-          const contain =
-            item.fit === "contain" || item.treatment === "full";
+          // Protocol treatments: full = contain without cropping, cutout =
+          // contain + subject-polygon clip (Path2D), crop = cover crop.
+          // fit=contain (treatment crop) also lands on the contain branch.
+          // Without a subject polygon a cutout degrades to plain contain so
+          // the subject stays whole instead of being sliced by a cover crop.
+          const polygon =
+            item.treatment === "cutout"
+              ? polygonByAssetId.get(item.assetId) ?? null
+              : null;
+          const placement =
+            item.treatment === "crop" && item.fit === "cover"
+              ? null
+              : computeSlotPlacement({
+                  slot: {
+                    x: item.x,
+                    y: item.y,
+                    width: item.width,
+                    height: item.height,
+                  },
+                  imageSize: {
+                    width: image.naturalWidth,
+                    height: image.naturalHeight,
+                  },
+                  crop: item.crop,
+                  polygon,
+                });
           const centerX = item.x + item.width / 2;
           const centerY = item.y + item.height / 2;
           context.save();
@@ -1004,19 +1033,25 @@ export function OneTouchStudio() {
           );
           context.clip();
           context.globalAlpha = item.opacity;
-          if (contain) {
-            const scale = Math.min(
-              item.width / image.naturalWidth,
-              item.height / image.naturalHeight,
-            );
-            const drawWidth = image.naturalWidth * scale;
-            const drawHeight = image.naturalHeight * scale;
+          if (placement) {
+            if (placement.polygonPoints) {
+              const clipPath = new Path2D();
+              placement.polygonPoints.forEach((point, index) => {
+                if (index === 0) {
+                  clipPath.moveTo(point.x, point.y);
+                } else {
+                  clipPath.lineTo(point.x, point.y);
+                }
+              });
+              clipPath.closePath();
+              context.clip(clipPath);
+            }
             context.drawImage(
               image,
-              item.x + (item.width - drawWidth) / 2,
-              item.y + (item.height - drawHeight) / 2,
-              drawWidth,
-              drawHeight,
+              placement.imageRect.x,
+              placement.imageRect.y,
+              placement.imageRect.width,
+              placement.imageRect.height,
             );
           } else {
             context.drawImage(

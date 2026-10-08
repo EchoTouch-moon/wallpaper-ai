@@ -35,6 +35,11 @@ import {
   loadProjectDraft,
   saveProjectDraft,
 } from "@/lib/storage/projectDatabase";
+import { applySlotTreatmentsToCanvas } from "@/lib/client/fabricCutout";
+import {
+  mergeSerializedTreatments,
+  subjectPolygonOf,
+} from "@/lib/client/cutoutGeometry";
 import { createProjectSnapshot } from "@wallpaper/core/storage";
 import { useEditorStore } from "@/store/editorStore";
 import type { ImageAsset } from "@wallpaper/core/types";
@@ -263,6 +268,13 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
           layout,
           useEditorStore.getState().assets,
         );
+        // Contain/cutout treatment semantics on top of core's slot stretch
+        // (packages/core is owned by another workstream; see fabricCutout.ts).
+        applySlotTreatmentsToCanvas(
+          canvas,
+          layout,
+          useEditorStore.getState().assets,
+        );
         syncCanvasState();
         return true;
       } finally {
@@ -296,7 +308,21 @@ export function EditorProvider({ children }: Readonly<{ children: ReactNode }>) 
     const canvas = canvasRef.current;
     const state = useEditorStore.getState();
     if (canvas && state.currentLayout && !isApplyingLayoutRef.current) {
-      state.commitLayout(serializeCanvasLayout(canvas, state.currentLayout));
+      // serializeCanvasLayout (core) hardcodes fit "cover" and drops
+      // treatment; restore full/cutout semantics so edits round-trip.
+      const polygonByAssetId = new Map(
+        state.assets.flatMap((asset) => {
+          const polygon = subjectPolygonOf(asset.analysis);
+          return polygon ? ([[asset.id, polygon]] as const) : [];
+        }),
+      );
+      state.commitLayout(
+        mergeSerializedTreatments(
+          serializeCanvasLayout(canvas, state.currentLayout),
+          state.currentLayout,
+          polygonByAssetId,
+        ),
+      );
     }
   }, []);
 
