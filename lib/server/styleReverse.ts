@@ -663,19 +663,42 @@ async function requestReverseCompletion(
   return content;
 }
 
+/**
+ * Normalizes a non-streamed assistant message content to plain text. The SDK
+ * response types say string | null, but relays also answer with the segmented
+ * content-part array form ({type:"text"} parts); an unnormalized array would
+ * TypeError inside extractJsonValue and burn the validation retry. Text parts
+ * concatenate in order; every other shape collapses to "" so the
+ * empty-response error below still fires.
+ */
+function messageContentToText(
+  content: string | Array<{ type: string; text?: string }> | null | undefined,
+): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part?.text === "string" ? part.text : ""))
+      .join("");
+  }
+  return "";
+}
+
 async function bufferCompletionContent(
   client: OpenAI,
   body: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
 ): Promise<string> {
   const completion = await client.chat.completions.create(body);
   const message = completion.choices[0]?.message;
-  if (!message?.content) {
+  const content = messageContentToText(message?.content);
+  if (!content) {
     throw new StyleReverseError(
       "invalid_response",
       message?.refusal || "Reverse model returned an empty response",
     );
   }
-  return message.content;
+  return content;
 }
 
 async function streamCompletionContent(

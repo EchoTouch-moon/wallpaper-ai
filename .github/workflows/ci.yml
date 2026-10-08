@@ -30,8 +30,8 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Unit tests (packages/core + app/api)
-        run: node --test --experimental-strip-types "packages/core/**/*.test.mjs" "app/api/**/*.test.mjs"
+      - name: Unit tests (packages/core + app/api + lib)
+        run: node --test --experimental-strip-types "packages/core/**/*.test.mjs" "app/api/**/*.test.mjs" "lib/client/**/*.test.mjs" "lib/server/**/*.test.mjs"
 
       - name: Build
         run: pnpm build

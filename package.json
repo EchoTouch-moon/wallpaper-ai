@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --test --experimental-strip-types app/api/*/*.test.mjs",
+    "test": "node --test --experimental-strip-types app/api/*/*.test.mjs lib/client/*.test.mjs lib/server/*.test.mjs",
     "test:ai:smoke": "node --experimental-strip-types scripts/smoke-layout-model.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
